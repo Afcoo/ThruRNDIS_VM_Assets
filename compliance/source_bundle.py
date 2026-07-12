@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import urllib.parse
 import zipfile
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
@@ -45,6 +46,7 @@ MAX_LICENSE_FILE = 8 * 1024 * 1024
 MAX_LICENSE_TOTAL = 64 * 1024 * 1024
 MAX_LICENSE_COUNT = 10000
 _FETCH_IMAGES: dict[str, str] = {}
+ALPINE_DISTFILES_URL = "https://distfiles.alpinelinux.org/distfiles"
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -330,10 +332,72 @@ find /distfiles -type f -exec chmod 0644 {} +
         distfiles.chmod(original_mode)
 
 
+def fetch_alpine_distfile(
+    cache: Path,
+    filename: str,
+    branch: str,
+    algorithm: str,
+    expected_digest: str,
+) -> str | None:
+    """Fetch an immutable, checksummed copy from Alpine's distfile archive.
+
+    Alpine keeps source files whose original upstream URL has disappeared.
+    A mirror miss falls back to the exact APKBUILD URL through ``abuild
+    fetch``; a mirror hit with the wrong digest fails closed.
+    """
+
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+", branch):
+        raise ComplianceError(f"invalid Alpine distfiles branch: {branch!r}")
+    curl = shutil.which("curl")
+    if curl is None:
+        return None
+    cache.mkdir(parents=True, exist_ok=True)
+    encoded = urllib.parse.quote(filename, safe="")
+    url = f"{ALPINE_DISTFILES_URL}/{branch}/{encoded}"
+    destination = cache / filename
+    temporary = cache / f".{filename}.alpine-download"
+    if temporary.exists():
+        temporary.unlink()
+    result = subprocess.run(
+        [
+            curl,
+            "-fsSL",
+            "--retry",
+            "3",
+            "--retry-all-errors",
+            "--connect-timeout",
+            "30",
+            "--max-time",
+            "900",
+            "--output",
+            str(temporary),
+            url,
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        if temporary.exists():
+            temporary.unlink()
+        return None
+    actual = hash_file(temporary, algorithm)
+    if actual != expected_digest:
+        temporary.unlink()
+        raise ComplianceError(
+            f"Alpine distfile mirror checksum mismatch for {filename}: "
+            f"{actual} != {expected_digest}"
+        )
+    temporary.replace(destination)
+    return url
+
+
 def collect_distfiles(
     recipe: Path,
     destination: Path,
     cache: Path,
+    alpine_branch: str,
     alpine_version: str,
     architecture: str,
     offline: bool,
@@ -353,12 +417,23 @@ def collect_distfiles(
                 raise ComplianceError(f"{candidate}: {algorithm} mismatch: {actual} != {digest}")
         return result
 
+    retrieval_urls: dict[str, str] = {}
     missing = missing_remote()
     if missing:
         if offline:
             raise ComplianceError(f"offline source cache lacks {missing} for {recipe}")
-        fetch_recipe_sources(recipe, cache, alpine_version, architecture)
+        for filename in missing:
+            mirror_url = fetch_alpine_distfile(
+                cache, filename, alpine_branch, algorithm, expected[filename]
+            )
+            if mirror_url is not None:
+                retrieval_urls[filename] = mirror_url
         missing = missing_remote()
+        if missing:
+            fetch_recipe_sources(recipe, cache, alpine_version, architecture)
+            for filename in missing:
+                retrieval_urls[filename] = "APKBUILD source URL via abuild fetch"
+            missing = missing_remote()
         if missing:
             raise ComplianceError(f"source fetch did not produce {missing} for {recipe}")
 
@@ -375,7 +450,15 @@ def collect_distfiles(
         target = destination / filename
         shutil.copyfile(source, target)
         target.chmod(0o644)
-        rows.append({"name": filename, "kind": "upstream-distfile", algorithm: digest, "sha256": sha256_file(target)})
+        row = {
+            "name": filename,
+            "kind": "upstream-distfile",
+            algorithm: digest,
+            "sha256": sha256_file(target),
+        }
+        if filename in retrieval_urls:
+            row["retrievedFrom"] = retrieval_urls[filename]
+        rows.append(row)
     return rows
 
 
@@ -714,6 +797,7 @@ def run(arguments: argparse.Namespace) -> None:
             recipe,
             origin_distfiles,
             distfile_cache / origin,
+            str(lock["alpine"]["branch"]),
             str(lock["alpine"]["version"]),
             str(lock["alpine"]["arch"]),
             arguments.offline,

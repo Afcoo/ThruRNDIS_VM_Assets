@@ -29,8 +29,7 @@ The supported build environment is Ubuntu 24.04. Install the tools used by CI:
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
   ca-certificates cpio curl file git jq kmod libarchive-tools pipx python3 \
-  python3-venv qemu-system-arm qemu-system-data rsync shellcheck squashfs-tools \
-  unzip xz-utils zip zstd
+  python3-venv qemu-system-arm rsync shellcheck squashfs-tools unzip xz-utils zip zstd
 ```
 
 Creating the corresponding-source archive also requires a running Docker

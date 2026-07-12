@@ -25,7 +25,12 @@ sys.path.insert(0, str(COMPLIANCE_DIR))
 import build_compliance  # noqa: E402
 import verify_compliance  # noqa: E402
 from common import ComplianceError, load_policy, normalize_license, sha256_file, write_json  # noqa: E402
-from source_bundle import ensure_commits, recipe_checksums, source_inventory  # noqa: E402
+from source_bundle import (  # noqa: E402
+    ensure_commits,
+    extract_licenses_from_tar,
+    recipe_checksums,
+    source_inventory,
+)
 
 
 def sha256(data: bytes) -> str:
@@ -94,6 +99,31 @@ class ComplianceTests(unittest.TestCase):
             (root / "escape").symlink_to("../outside")
             with self.assertRaisesRegex(ComplianceError, "escapes root"):
                 source_inventory(root)
+
+    def test_license_extraction_ignores_empty_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            (source / "build").mkdir(parents=True)
+            (source / "build/LICENSE").write_bytes(b"")
+            (source / "LICENSE").write_text("Copyright 2026 Example\nMIT License\n")
+            archive = root / "source.tar.gz"
+            with tarfile.open(archive, "w:gz") as handle:
+                handle.add(source, arcname="example")
+
+            destination = root / "licenses"
+            budget = [0, 0]
+            self.assertTrue(
+                extract_licenses_from_tar(archive, destination, ["LICENSE*"], [], budget)
+            )
+            self.assertFalse(
+                (destination / "from-source.tar.gz/example/build/LICENSE").exists()
+            )
+            self.assertEqual(
+                (destination / "from-source.tar.gz/example/LICENSE").read_text(),
+                "Copyright 2026 Example\nMIT License\n",
+            )
+            self.assertEqual(budget, [35, 1])
 
     def test_ensure_commits_materializes_generator_once(self) -> None:
         commits = ("1" * 40, "2" * 40)

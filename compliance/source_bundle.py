@@ -419,7 +419,13 @@ def extract_licenses_from_tar(
                 raise
             if not is_license_path(relative, patterns, explicit_basenames):
                 continue
-            if member.size <= 0 or member.size > MAX_LICENSE_FILE:
+            # Some upstream archives carry empty compatibility placeholders
+            # next to the authoritative license text (for example zstd's
+            # build/LICENSE). Ignore the empty duplicate, then fail below if
+            # the origin has no non-empty license/copyright evidence at all.
+            if member.size == 0:
+                continue
+            if member.size > MAX_LICENSE_FILE:
                 raise ComplianceError(f"invalid license file size in {archive_path}: {member.name} ({member.size})")
             budget[0] += member.size
             budget[1] += 1
@@ -458,7 +464,9 @@ def extract_licenses_from_zip(
             relative = require_relative_path(info.filename, "distfile ZIP member")
             if not is_license_path(relative, patterns, explicit_basenames):
                 continue
-            if info.file_size <= 0 or info.file_size > MAX_LICENSE_FILE:
+            if info.file_size == 0:
+                continue
+            if info.file_size > MAX_LICENSE_FILE:
                 raise ComplianceError(f"invalid license file size in {archive_path}: {info.filename}")
             budget[0] += info.file_size
             budget[1] += 1
@@ -489,7 +497,9 @@ def collect_license_evidence(
         if path.is_file() and is_license_path(
             PurePosixPath(path.relative_to(recipe).as_posix()), patterns, explicit_basenames
         ):
-            if path.stat().st_size <= 0 or path.stat().st_size > MAX_LICENSE_FILE:
+            if path.stat().st_size == 0:
+                continue
+            if path.stat().st_size > MAX_LICENSE_FILE:
                 raise ComplianceError(f"invalid aports license file size: {path}")
             target = destination / "from-aports" / path.relative_to(recipe)
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -504,7 +514,9 @@ def collect_license_evidence(
         if not found:
             found = extract_licenses_from_zip(path, destination, patterns, explicit_basenames, budget)
         if not found and is_license_path(PurePosixPath(path.name), patterns, explicit_basenames):
-            if path.stat().st_size <= 0 or path.stat().st_size > MAX_LICENSE_FILE:
+            if path.stat().st_size == 0:
+                continue
+            if path.stat().st_size > MAX_LICENSE_FILE:
                 raise ComplianceError(f"invalid raw license distfile size: {path}")
             target = destination / f"from-{path.name}" / path.name
             target.parent.mkdir(parents=True, exist_ok=True)

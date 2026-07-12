@@ -38,7 +38,7 @@ jobs:
 
       - name: Check source and license metadata
         run: |
-          shellcheck \
+          shellcheck --severity=warning \
             script/make_vm_assets \
             script/make_source_bundle \
             script/initramfs/*

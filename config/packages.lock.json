@@ -1,0 +1,555 @@
+{
+  "alpine": {
+    "apkIndexSha256": {
+      "community": "9d7e6698a11a5e7b1aaad4f8656cc03b1ccfda7de8f23944beefe744b030624b",
+      "main": "b36a31b80b5347605513eb7790d863b32cebe873604072be33e268e98ca99ca1"
+    },
+    "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
+    "arch": "aarch64",
+    "branch": "v3.24",
+    "flavor": "standard",
+    "isoSha256": "95eba9066d7920fe703dd62b8b8e7f38c45eba0bad225dbe2ccfb5b76cf5356d",
+    "isoUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.1-aarch64.iso",
+    "version": "3.24.1"
+  },
+  "packages": [
+    {
+      "apkIndexChecksum": "Q1Tmocg1FubGlvWQ6+OAUIG9yLWko=",
+      "aportsCommit": "1522c3193610902d8493f9790a2755c11f21f26d",
+      "datahash": "bfbd96492477bb776613589e4de2bfde5f820473b8e306f78939862edc6cb19a",
+      "dependencies": [
+        "/bin/sh",
+        "so:libc.musl-aarch64.so.1",
+        "so:libreadline.so.8"
+      ],
+      "file": "bash-5.3.9-r1.apk",
+      "license": "GPL-3.0-or-later",
+      "name": "bash",
+      "origin": "bash",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "95f4f976bdf2f4ca18ff41c32916eb6d7b12a0dae12504d55d04427460d6542f",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/bash-5.3.9-r1.apk",
+      "version": "5.3.9-r1"
+    },
+    {
+      "apkIndexChecksum": "Q1cc/8KYHy1Us5N8Jb4vUWmz+wRTI=",
+      "aportsCommit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
+      "datahash": "57b1a4f64a48ecdb097dfa1f32cf10a0dc9d572f77e4bc8d7b4adcf0f0b075b6",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "busybox-1.37.0-r31.apk",
+      "license": "GPL-2.0-only",
+      "name": "busybox",
+      "origin": "busybox",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "18e3490a6f024004b2b13dd4b54bd50ccd82894938023b2d4eab389a4edcba70",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/busybox-1.37.0-r31.apk",
+      "version": "1.37.0-r31"
+    },
+    {
+      "apkIndexChecksum": "Q1ax93IqPnu5fQTo75Bv1ywGZ7pdA=",
+      "aportsCommit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
+      "datahash": "01e4c8cf14988e2746aa37ebfd7bc25d6c3596cb39e024102b5ea52d4542e8a9",
+      "dependencies": [
+        "busybox=1.37.0-r31"
+      ],
+      "file": "busybox-binsh-1.37.0-r31.apk",
+      "license": "GPL-2.0-only",
+      "name": "busybox-binsh",
+      "origin": "busybox",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "f3a1b2257cfa114ff20de05c665f380695385d589908bfc9af5768f39fef9ef5",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/busybox-binsh-1.37.0-r31.apk",
+      "version": "1.37.0-r31"
+    },
+    {
+      "apkIndexChecksum": "Q1DJzr9ZbIpl8s1zSomENWF6MQREM=",
+      "aportsCommit": "206e7b39f7884d62a174aba4d33a42454518c1c2",
+      "datahash": "1e42d3a0948677315c20a63b9b71fd91ec0eef674dcfa4f81e5de711efdfd84b",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "gmp-6.3.0-r4.apk",
+      "license": "LGPL-3.0-or-later OR GPL-2.0-or-later",
+      "name": "gmp",
+      "origin": "gmp",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "4dab6e86b850fe1b5bc0cf2fac17efa4d7f648bea44f3d9019694cc1e1cb12b7",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/gmp-6.3.0-r4.apk",
+      "version": "6.3.0-r4"
+    },
+    {
+      "apkIndexChecksum": "Q1kG2xyd9s6vfCyb09MDOCwKqAYK4=",
+      "aportsCommit": "3ee752ad0c8445c8105177cd5cebdd730789bcd8",
+      "datahash": "54d9694f791953efc572af75d372038db9544107713359e20155f06886f53ef4",
+      "dependencies": [
+        "iproute2-minimal",
+        "iproute2-tc",
+        "iproute2-ss",
+        "/bin/sh",
+        "so:libc.musl-aarch64.so.1",
+        "so:libcap.so.2",
+        "so:libmnl.so.0"
+      ],
+      "file": "iproute2-7.0.0-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "iproute2",
+      "origin": "iproute2",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "fbcfeece6ecf0d8273e946dcfbafc22c5a86982273f6e7763db06a52a329786b",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/iproute2-7.0.0-r0.apk",
+      "version": "7.0.0-r0"
+    },
+    {
+      "apkIndexChecksum": "Q11L7WmvnQpHyyKOpSSVZpBwm9oT8=",
+      "aportsCommit": "3ee752ad0c8445c8105177cd5cebdd730789bcd8",
+      "datahash": "7e916defba2aef0d4e9039439e530b6307c5f895863450839284ba7491cb271c",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libcap.so.2",
+        "so:libelf.so.1",
+        "so:libmnl.so.0"
+      ],
+      "file": "iproute2-minimal-7.0.0-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "iproute2-minimal",
+      "origin": "iproute2",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "5ef23a7fd11df32dae739de6f3faca463711809eeab0391c38ad268636ee0b70",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/iproute2-minimal-7.0.0-r0.apk",
+      "version": "7.0.0-r0"
+    },
+    {
+      "apkIndexChecksum": "Q14o2RfkImoWkXzhDVjYb+uRK3vBM=",
+      "aportsCommit": "3ee752ad0c8445c8105177cd5cebdd730789bcd8",
+      "datahash": "66b484c5a89d391089cd40cd55030eefb032e8fd7cd55ad4dfa38f6550c6129b",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libcap.so.2",
+        "so:libmnl.so.0"
+      ],
+      "file": "iproute2-ss-7.0.0-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "iproute2-ss",
+      "origin": "iproute2",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "aedabd90cdd393d3c90c3dd71d60d25722ab229e6b6e3e112c820f20c9b778dc",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/iproute2-ss-7.0.0-r0.apk",
+      "version": "7.0.0-r0"
+    },
+    {
+      "apkIndexChecksum": "Q17SEWvvRDT31CS3dgbJtnMgKiSys=",
+      "aportsCommit": "3ee752ad0c8445c8105177cd5cebdd730789bcd8",
+      "datahash": "0fe24118e1a9dcbbbb2c317efe450c7ac0fd11f9d2e090dd4bb2642c93e05ce3",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libcap.so.2",
+        "so:libelf.so.1",
+        "so:libmnl.so.0",
+        "so:libxtables.so.12"
+      ],
+      "file": "iproute2-tc-7.0.0-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "iproute2-tc",
+      "origin": "iproute2",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "748f12e0d0f13503f113e36fe4f8e287541c5d51d8c9c8fae1e2dcf31a7db903",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/iproute2-tc-7.0.0-r0.apk",
+      "version": "7.0.0-r0"
+    },
+    {
+      "apkIndexChecksum": "Q185lBVZZFfo04G/qflaBhcPayHJs=",
+      "aportsCommit": "88919740865a31680e7f1c4cb568dfd7a87e9f08",
+      "datahash": "57c8db97fb805cb8957503c3a05d6fe545c968ef1d5c6b9282631bdfc4ea91c3",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "jansson-2.15.0-r0.apk",
+      "license": "MIT",
+      "name": "jansson",
+      "origin": "jansson",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "a13822f5ca1772cced4bb7d3d178ec5dee770d8accba5b4816b2ddc413e6f055",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/jansson-2.15.0-r0.apk",
+      "version": "2.15.0-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1D7Zbhf6Z1RNJmW3yLAyqdd+IIxw=",
+      "aportsCommit": "0c35848136c4c16a1b1672cb812efa88fffef1c2",
+      "datahash": "6dab913ed1a12f66135e403218de98b0ef801be45e07f22d95fdaf76cb1f3412",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libcap2-2.78-r0.apk",
+      "license": "BSD-3-Clause OR GPL-2.0-only",
+      "name": "libcap2",
+      "origin": "libcap",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "e13be383f18b1fcfe895361d816ff7cfd2b3c265e442bb371c4a234b29b0e4a9",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcap2-2.78-r0.apk",
+      "version": "2.78-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1B+W/WsLe+RZ3uvymoYtsJR6A9To=",
+      "aportsCommit": "4a4352d83ab03720965454a8c7b30b1b6a996c84",
+      "datahash": "f4f97bd34105d01bb967334589b252613a434e82b5c57e90b3ea0dd1ab97945d",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libcrypto3-3.5.7-r0.apk",
+      "license": "Apache-2.0",
+      "name": "libcrypto3",
+      "origin": "openssl",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "936ce77a0f5621c9ebc91395d01c62d1127b13e6981d5eb55cdcae7a389540d0",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.7-r0.apk",
+      "version": "3.5.7-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1RCjq5C/BE4wYYYUjB33eFah9qj4=",
+      "aportsCommit": "8f13294206888f3dd44ed74a8eb3dd9934499e81",
+      "datahash": "e166e5221ce6189eec8a20187f8d62aec3487094e7ad4934372f89e820de481e",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libz.so.1",
+        "so:libzstd.so.1"
+      ],
+      "file": "libelf-0.195-r0.apk",
+      "license": "GPL-3.0-or-later AND ( GPL-2.0-or-later OR LGPL-3.0-or-later )",
+      "name": "libelf",
+      "origin": "elfutils",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "1c108314af454a885ac0b053201db57027470c4f2309412c016897e2a2bf5d0e",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libelf-0.195-r0.apk",
+      "version": "0.195-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1hEKvOZvv8fBWUp+l57eRAPiG1T4=",
+      "aportsCommit": "fc95c59998285564fbcb0bfb2443898c62e10171",
+      "datahash": "fe0ade0ed515cdd47cdb849e54d971a69c222dab16f646740baeb14c59871b33",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libmnl-1.0.5-r2.apk",
+      "license": "LGPL-2.1-or-later",
+      "name": "libmnl",
+      "origin": "libmnl",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "0ca382c70f78affef3a4a28016aab25ad8c3ccf1bcdad59f3968d4536a7b2478",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libmnl-1.0.5-r2.apk",
+      "version": "1.0.5-r2"
+    },
+    {
+      "apkIndexChecksum": "Q1wNl5+kek1M3VEWlcXl8M4+jPHqI=",
+      "aportsCommit": "2cee8a7328d061418336ad327b512d96bcd7bc5e",
+      "datahash": "9debb83383150edb3ffcdcc69b09f33543691642aebf1de274dab9a6777125a0",
+      "dependencies": [
+        "ncurses-terminfo-base=6.6_p20260516-r0",
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libncursesw-6.6_p20260516-r0.apk",
+      "license": "X11",
+      "name": "libncursesw",
+      "origin": "ncurses",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "51a7aa4b3ec40b144d0801c0544e0a9f62e2a41d04b6067bb5e95786040741c6",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libncursesw-6.6_p20260516-r0.apk",
+      "version": "6.6_p20260516-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1K/EtkqrW/Ch8vrksthxYMu4krsE=",
+      "aportsCommit": "80fae26950fd406b1645cfa15aa6eba0b850ecef",
+      "datahash": "f2d61d18edcd49b45a546451b7d2ccf033364a6e1f8272db71db2bddd421d0fa",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libmnl.so.0"
+      ],
+      "file": "libnftnl-1.3.1-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "libnftnl",
+      "origin": "libnftnl",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "8b31395671e910c294d7f0e29d3ac3c7efe9d89264db255f39aa9944dd4b6cac",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libnftnl-1.3.1-r0.apk",
+      "version": "1.3.1-r0"
+    },
+    {
+      "apkIndexChecksum": "Q16g4la41Cg3iCWcNsWjUCU5S13Mo=",
+      "aportsCommit": "a9e2a2dc46f377eb25884f7fea9834492de7f518",
+      "datahash": "72ac51f8ff077f8c477e77c148d4653f0c9df34d155d0d2bff6fbca576908cf1",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libpcap-1.10.6-r1.apk",
+      "license": "BSD-3-Clause",
+      "name": "libpcap",
+      "origin": "libpcap",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "b204a41347820f3ba005a884ab9ce9698fc05da42889ad94d9f4ab355c45717b",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libpcap-1.10.6-r1.apk",
+      "version": "1.10.6-r1"
+    },
+    {
+      "apkIndexChecksum": "Q16bRNkqc+NZI1wx+jQCnzNalwuLk=",
+      "aportsCommit": "8848fb97f5ec1aa887b836cf412d88eaabe312b6",
+      "datahash": "dd6bc91548a795c4f2c9bfd749febef63a67c46b20ad698c680e87f74611c6d4",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libxtables-1.8.13-r0.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "libxtables",
+      "origin": "iptables",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "7535f18d9c7229178bc5e3809e5fea171033e33dfa054d88846512e1f25eefa8",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libxtables-1.8.13-r0.apk",
+      "version": "1.8.13-r0"
+    },
+    {
+      "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
+      "datahash": "sha256:b5360c29f311cb2e077e157e9d24d398c681dfd064fbf92cddbb27f55d9835cc",
+      "dependencies": [],
+      "file": "boot/modloop-lts",
+      "license": "GPL-2.0-only",
+      "name": "linux-lts",
+      "origin": "linux-lts",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.1-aarch64.iso",
+      "repositoryName": "release-iso",
+      "role": "kernel",
+      "sha256": "b5360c29f311cb2e077e157e9d24d398c681dfd064fbf92cddbb27f55d9835cc",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.1-aarch64.iso#boot/modloop-lts",
+      "version": "6.18.35-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1JNQts+O/Z+jaJ4QHLMXQ5svftIU=",
+      "aportsCommit": "f5640d3a10f664c9119720c60515265d3d6f6d01",
+      "datahash": "bdf59e919031242f2cdf96ea84180fd309de5e66821cc80103b6109164d7c2be",
+      "dependencies": [],
+      "file": "musl-1.2.6-r2.apk",
+      "license": "MIT",
+      "name": "musl",
+      "origin": "musl",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "5e9674b7f41152fe2119093b5cb4c13eaaadb19c2d5422b2d7267913e663ee6e",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/musl-1.2.6-r2.apk",
+      "version": "1.2.6-r2"
+    },
+    {
+      "apkIndexChecksum": "Q1/MzFElM7Tf9vRK02sG+bQ+iEjR8=",
+      "aportsCommit": "2cee8a7328d061418336ad327b512d96bcd7bc5e",
+      "datahash": "dc14910f3883943bfdd621c801e4d479cf3c3b4df443644e353ef001345df8ed",
+      "dependencies": [],
+      "file": "ncurses-terminfo-base-6.6_p20260516-r0.apk",
+      "license": "X11",
+      "name": "ncurses-terminfo-base",
+      "origin": "ncurses",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "e0c546b9461bdce206a90bc720cb69aa4628b5a5b8d908c3e5084e00f28f6a9d",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/ncurses-terminfo-base-6.6_p20260516-r0.apk",
+      "version": "6.6_p20260516-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1TZV+GUqb8OKwRjco5tm5KgffM0g=",
+      "aportsCommit": "e0326a8ae770e02742daadffe8a8e64d8290ce06",
+      "datahash": "75ab2c48a5ba845579d5cabef6cb142fb900a15f020b08bdae562b5a5ca028f7",
+      "dependencies": [
+        "/bin/sh",
+        "so:libc.musl-aarch64.so.1",
+        "so:libgmp.so.10",
+        "so:libjansson.so.4",
+        "so:libmnl.so.0",
+        "so:libnftnl.so.11",
+        "so:libreadline.so.8"
+      ],
+      "file": "nftables-1.1.6-r1.apk",
+      "license": "GPL-2.0-or-later",
+      "name": "nftables",
+      "origin": "nftables",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "e350dc0ae7667486f925a6719add6df562055799baf0e402077ef2b11839ac9e",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/nftables-1.1.6-r1.apk",
+      "version": "1.1.6-r1"
+    },
+    {
+      "apkIndexChecksum": "Q1nllP89iiVO66olJrfKuzbskun4Y=",
+      "aportsCommit": "bcbc81c3c1eba3078a4f536a8a0d2c907a5b21ff",
+      "datahash": "c2e6f7c800fb70622736e27910e81901b860ef5983c8a6d7f880903bb2156197",
+      "dependencies": [],
+      "file": "openresolv-3.17.4-r0.apk",
+      "license": "BSD-2-Clause",
+      "name": "openresolv",
+      "origin": "openresolv",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "2d279e86d558fe6d155a49af699fd7be8867b42d5c89c803ee31df49ba2c1f0f",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openresolv-3.17.4-r0.apk",
+      "version": "3.17.4-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1GPvWxvOSv5J0EQfi4YdIeWwjGK8=",
+      "aportsCommit": "a854c03acdac188901fb012f7acbee70a36e8041",
+      "datahash": "663956f861094610beb718e1d542ee6a89c7f25c0b982082cf381ae749418a42",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libncursesw.so.6"
+      ],
+      "file": "readline-8.3.3-r1.apk",
+      "license": "GPL-3.0-or-later",
+      "name": "readline",
+      "origin": "readline",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "9f0ae0923c02b0d6aba62e9173542b65396ba3f0efefcbf087ea32f1120e7b34",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/readline-8.3.3-r1.apk",
+      "version": "8.3.3-r1"
+    },
+    {
+      "apkIndexChecksum": "Q1EggNrUV4EQPTdqvRXYSvZ6zNJb0=",
+      "aportsCommit": "1e5342cc5257c8fcf84f1631a213605c2caeab96",
+      "datahash": "25b9a79d6b0e34fd56691aa7519a8f50ed0e2b0be300631cb8aa47bafebaef8b",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libcrypto.so.3",
+        "so:libpcap.so.1"
+      ],
+      "file": "tcpdump-4.99.6-r1.apk",
+      "license": "BSD-3-Clause",
+      "name": "tcpdump",
+      "origin": "tcpdump",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "33b5515b34ed595b47e7843dcda8e780682b5a1a162a0a38f1dcaf6ab9528791",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/tcpdump-4.99.6-r1.apk",
+      "version": "4.99.6-r1"
+    },
+    {
+      "apkIndexChecksum": "Q1OurBn4gJX+znXLZYhirA/7Pc7OQ=",
+      "aportsCommit": "555c1f4b3dc44865eb35168a590e69f0c7a33e76",
+      "datahash": "d5f26a7febd70022de2629ba6c872dcd9b52511430c027c51ed37ef94727bc71",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "wireguard-tools-wg-1.0.20260223-r0.apk",
+      "license": "GPL-2.0-only",
+      "name": "wireguard-tools-wg",
+      "origin": "wireguard-tools",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "86c64a73399155847f410eecc1834e3b06ba9f8e01ecbf44e895409dfb773959",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/wireguard-tools-wg-1.0.20260223-r0.apk",
+      "version": "1.0.20260223-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1CUrvu7rPj+vyPHFVsP6zAL8FgVQ=",
+      "aportsCommit": "555c1f4b3dc44865eb35168a590e69f0c7a33e76",
+      "datahash": "ed21c246a3d33307cfd75a8c83fa5ded52d50eadff6199866ce1011caba157a7",
+      "dependencies": [
+        "wireguard-tools-wg=1.0.20260223-r0",
+        "bash",
+        "cmd:resolvconf",
+        "iproute2"
+      ],
+      "file": "wireguard-tools-wg-quick-1.0.20260223-r0.apk",
+      "license": "GPL-2.0-only",
+      "name": "wireguard-tools-wg-quick",
+      "origin": "wireguard-tools",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "5ca3e8ca7eef19053e575d636316edb4be1f2ffb7322664c502d30332dc264b7",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/wireguard-tools-wg-quick-1.0.20260223-r0.apk",
+      "version": "1.0.20260223-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1qeG8MrsxW/2sYiT5J4Xk2aM0vyk=",
+      "aportsCommit": "f248b33b5943c7dc69bf691031d7612ab2e8ed93",
+      "datahash": "43b94541d31345adf9ef49d5bce92b2ed04ec834356435bf0d3023fc73985641",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "zlib-1.3.2-r0.apk",
+      "license": "Zlib",
+      "name": "zlib",
+      "origin": "zlib",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "a535991af7c9e8369ebbf33c1e388c1bc63c87ead5142eddaee71f65836c33e3",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zlib-1.3.2-r0.apk",
+      "version": "1.3.2-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1UrGFE6B78rsNBjRohoH37c42uco=",
+      "aportsCommit": "3c6e2ee2b16f403d53eab39c4426eb61f003c322",
+      "datahash": "9b661b5057a2bb94fdcc9ec23843475185688dde13c1f61d2febb94ab32d25fc",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "zstd-libs-1.5.7-r2.apk",
+      "license": "BSD-3-Clause OR GPL-2.0-or-later",
+      "name": "zstd-libs",
+      "origin": "zstd",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "2bb5136c89f5b0bbe1554c8915a3b520d5aa63ae2a51d4d821eb81698db5a818",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zstd-libs-1.5.7-r2.apk",
+      "version": "1.5.7-r2"
+    }
+  ],
+  "rootPackages": [
+    "busybox",
+    "iproute2",
+    "nftables",
+    "wireguard-tools-wg-quick",
+    "tcpdump"
+  ],
+  "schemaVersion": 1,
+  "spdxFileCopyrightText": "2026 Afcoo",
+  "spdxLicenseIdentifier": "GPL-2.0-or-later"
+}

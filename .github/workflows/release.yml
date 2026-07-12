@@ -1,0 +1,283 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Release VM assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example alpine-3.24.1-r1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-vm-assets
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          release_commit=$(git rev-parse HEAD)
+
+          if [[ ! $RELEASE_TAG =~ ^alpine-[0-9]+\.[0-9]+\.[0-9]+-r[1-9][0-9]*$ ]]; then
+            echo "Release tag must match alpine-<major>.<minor>.<patch>-r<N>." >&2
+            exit 1
+          fi
+
+          config_version=$(python3 - <<'PY'
+          from pathlib import Path
+
+          for line in Path("config/alpine.env").read_text().splitlines():
+              if line.startswith("ALPINE_VERSION="):
+                  print(line.split("=", 1)[1].strip().strip("'\""))
+                  break
+          PY
+          )
+          tag_version=${RELEASE_TAG#alpine-}
+          tag_version=${tag_version%-r*}
+          if [[ -z $config_version || $tag_version != "$config_version" ]]; then
+            echo "Release tag Alpine version $tag_version does not match config $config_version." >&2
+            exit 1
+          fi
+
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tag_commit=$(git rev-list -n 1 "$RELEASE_TAG")
+            if [[ $tag_commit != "$release_commit" ]]; then
+              echo "Existing tag points to $tag_commit, not $release_commit." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Ensure draft Release at the checked-out commit
+        shell: bash
+        run: |
+          release_commit=$(git rev-parse HEAD)
+
+          printf '%s\n' \
+            "ThruRNDIS VM assets for the locked Alpine inputs at ${release_commit}." \
+            "" \
+            "The binary is a multi-license aggregate. Download vm_assets-sources.tar.zst," \
+            "THIRD_PARTY_NOTICES.md, and sbom.spdx.json with vm_assets.zip." \
+            > "$RUNNER_TEMP/release-notes.md"
+
+          if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            [[ $is_draft == true ]] || {
+              echo "Refusing to replace an already-published Release." >&2
+              exit 1
+            }
+            target=$(gh release view "$RELEASE_TAG" --json targetCommitish --jq '.targetCommitish')
+            if [[ $target != "$release_commit" ]]; then
+              echo "Existing draft targets $target, not $release_commit." >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --target "$release_commit" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+
+      - name: Install build and verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            ca-certificates cpio curl file git jq kmod libarchive-tools pipx \
+            python3 python3-venv qemu-system-arm rsync shellcheck squashfs-tools unzip \
+            xz-utils zip zstd
+          docker version
+
+      - name: Check source and license metadata
+        run: |
+          shellcheck \
+            script/make_vm_assets \
+            script/make_source_bundle \
+            script/initramfs/*
+          pipx run --spec 'reuse==5.1.1' reuse lint
+          python3 -m compileall -q compliance script
+          ./script/make_vm_assets --self-test
+          python3 script/update_dependencies.py --self-test
+          python3 -m unittest discover -s compliance/tests -v
+
+      - name: Build locked VM assets
+        run: |
+          ./script/make_vm_assets \
+            --config config/alpine.env \
+            --lock config/packages.lock.json \
+            --output build
+
+      - name: Build corresponding-source archive
+        run: |
+          ./script/make_source_bundle \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --output build/release/vm_assets-sources.tar.zst
+
+      - name: Build compliance payload and binary archive
+        run: |
+          python3 compliance/build_compliance.py \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --asset-dir build/assets
+
+      - name: Verify distribution and corresponding source
+        run: |
+          python3 compliance/verify_compliance.py \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --asset-dir build/assets \
+            --source-bundle build/release/vm_assets-sources.tar.zst
+
+      - name: Smoke-test aarch64 boot
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          timeout --signal=TERM 45s qemu-system-aarch64 \
+            -machine virt \
+            -cpu cortex-a57 \
+            -smp 2 \
+            -m 512M \
+            -nographic \
+            -no-reboot \
+            -kernel build/assets/Image-lts \
+            -initrd build/assets/initramfs-rtpvm-lts \
+            -append "console=ttyAMA0 rdinit=/sbin/init panic=-1" \
+            2>&1 | tee build/qemu-smoke.log
+          qemu_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
+            echo "QEMU exited unexpectedly with status $qemu_status" >&2
+            exit "$qemu_status"
+          fi
+
+          grep -Fq "rtpvm-rcS: early boot setup finished" build/qemu-smoke.log
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          release_dir=build/release
+          install -m 0644 \
+            build/assets/compliance/sbom.spdx.json \
+            "$release_dir/sbom.spdx.json"
+          install -m 0644 \
+            build/assets/compliance/THIRD_PARTY_NOTICES.md \
+            "$release_dir/THIRD_PARTY_NOTICES.md"
+
+          (
+            cd "$release_dir"
+            sha256sum \
+              vm_assets.zip \
+              vm_assets-sources.tar.zst \
+              sbom.spdx.json \
+              THIRD_PARTY_NOTICES.md \
+              > SHA256SUMS
+          )
+
+          required_assets=(
+            vm_assets.zip
+            vm_assets-sources.tar.zst
+            sbom.spdx.json
+            THIRD_PARTY_NOTICES.md
+            SHA256SUMS
+          )
+          for asset in "${required_assets[@]}"; do
+            path="$release_dir/$asset"
+            if [[ ! -s $path ]]; then
+              echo "Missing or empty release asset: $asset" >&2
+              exit 1
+            fi
+            size=$(stat --format='%s' "$path")
+            if (( size >= 2147483648 )); then
+              echo "Release asset reaches GitHub's 2 GiB limit: $asset ($size bytes)" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload, read back, and publish the draft
+        shell: bash
+        run: |
+          release_dir=build/release
+          release_json="$RUNNER_TEMP/release.json"
+          release_commit=$(git rev-parse HEAD)
+
+          gh release view "$RELEASE_TAG" --json isDraft,targetCommitish > "$release_json"
+          jq --exit-status '.isDraft == true' "$release_json" >/dev/null || {
+            echo "Release is no longer a draft; refusing to replace assets." >&2
+            exit 1
+          }
+          target=$(jq --raw-output '.targetCommitish' "$release_json")
+          if [[ $target != "$release_commit" ]]; then
+            echo "Draft targets $target, not $release_commit." >&2
+            exit 1
+          fi
+
+          gh release upload "$RELEASE_TAG" --clobber \
+            "$release_dir/vm_assets.zip" \
+            "$release_dir/vm_assets-sources.tar.zst" \
+            "$release_dir/sbom.spdx.json" \
+            "$release_dir/THIRD_PARTY_NOTICES.md" \
+            "$release_dir/SHA256SUMS"
+
+          expected_assets=$(printf '%s\n' \
+            SHA256SUMS \
+            THIRD_PARTY_NOTICES.md \
+            sbom.spdx.json \
+            vm_assets-sources.tar.zst \
+            vm_assets.zip)
+          actual_assets=$(gh release view "$RELEASE_TAG" \
+            --json assets \
+            --jq '.assets[].name' | LC_ALL=C sort)
+
+          if [[ $actual_assets != "$expected_assets" ]]; then
+            echo "Draft Release asset allowlist mismatch." >&2
+            diff --unified <(printf '%s\n' "$expected_assets") \
+              <(printf '%s\n' "$actual_assets") || true
+            exit 1
+          fi
+
+          readback=build/release-readback
+          rm -rf "$readback"
+          mkdir -p "$readback"
+          gh release download "$RELEASE_TAG" --dir "$readback"
+
+          (
+            cd "$readback"
+            sha256sum --check SHA256SUMS
+          )
+
+          for asset in \
+            vm_assets.zip \
+            vm_assets-sources.tar.zst \
+            sbom.spdx.json \
+            THIRD_PARTY_NOTICES.md \
+            SHA256SUMS
+          do
+            cmp "$release_dir/$asset" "$readback/$asset"
+          done
+
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh release view "$RELEASE_TAG" \
+            --json isDraft \
+            --jq '.isDraft' | grep -Fx false

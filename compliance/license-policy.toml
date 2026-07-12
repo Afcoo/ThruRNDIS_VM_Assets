@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+version = 1
+project_license = "GPL-2.0-or-later"
+project_copyright = "Copyright (C) 2026 Afcoo"
+
+# Package metadata must resolve entirely to this reviewed SPDX vocabulary.  A
+# dependency update which introduces a different license intentionally fails
+# until the policy and the generated notices are reviewed together.
+allowed_licenses = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "GPL-2.0-only",
+  "GPL-2.0-or-later",
+  "GPL-3.0-or-later",
+  "LGPL-2.1-or-later",
+  "LGPL-3.0-or-later",
+  "MIT",
+  "X11",
+  "Zlib",
+]
+
+allowed_exceptions = []
+
+forbidden_license_tokens = ["NONE", "NOASSERTION", "LicenseRef-"]
+required_source_origins = ["busybox", "linux-lts"]
+source_license_patterns = ["COPYING*", "COPYRIGHT*", "LICENSE*", "LICENCE*", "NOTICE*"]
+
+[license_aliases]
+"GPL-2.0" = "GPL-2.0-only"
+"GPL-2.0+" = "GPL-2.0-or-later"
+"GPL-3.0+" = "GPL-3.0-or-later"
+"LGPL-2.1+" = "LGPL-2.1-or-later"
+"LGPL-3.0+" = "LGPL-3.0-or-later"
+
+[origin_license_files]
+# zlib carries its license grant in README rather than a LICENSE/COPYING file.
+zlib = ["README"]

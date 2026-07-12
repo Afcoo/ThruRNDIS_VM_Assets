@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+version = 1
+
+[[annotations]]
+path = [
+  "AGENTS.md",
+  "config/packages.lock.json",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Afcoo"
+SPDX-License-Identifier = "GPL-2.0-or-later"

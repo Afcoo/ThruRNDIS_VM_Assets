@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+.DS_Store
+.bootstrap/
+.cache/
+.venv/
+__pycache__/
+*.py[cod]
+build/
+dist/
+script/assets/

@@ -1,0 +1,287 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Update dependencies
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-vm-asset-dependencies
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install build and verification tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            ca-certificates cpio curl file git jq kmod libarchive-tools pipx \
+            python3 python3-venv qemu-system-arm rsync shellcheck squashfs-tools unzip \
+            xz-utils zip zstd
+          docker version
+
+      - name: Resolve latest stable Alpine and package lock
+        run: |
+          cp config/packages.lock.json "$RUNNER_TEMP/packages.lock.before.json"
+          python3 script/update_dependencies.py \
+            --config config/alpine.env \
+            --lock config/packages.lock.json \
+            --latest \
+            --cache-dir build/cache
+
+      - name: Detect dependency changes
+        id: changes
+        shell: bash
+        run: |
+          if git diff --quiet -- config/alpine.env config/packages.lock.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No newer Alpine release or package revision was found."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- config/alpine.env config/packages.lock.json
+          fi
+
+      - name: Render dependency and license diff
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python3 - \
+            "$RUNNER_TEMP/packages.lock.before.json" \
+            config/packages.lock.json \
+            "$RUNNER_TEMP/dependency-diff.md" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          after = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+
+          def package_index(lock):
+              return {
+                  (package["name"], package.get("role", "runtime")): package
+                  for package in lock["packages"]
+              }
+
+          def cell(value):
+              text = "-" if value in (None, "") else str(value)
+              return text.replace("\\", "\\\\").replace("|", "\\|")
+
+          def transition(old, new):
+              return f"`{cell(old)}` -> `{cell(new)}`"
+
+          old_packages = package_index(before)
+          new_packages = package_index(after)
+          rows = []
+          for key in sorted(set(old_packages) | set(new_packages)):
+              old = old_packages.get(key)
+              new = new_packages.get(key)
+              if old == new:
+                  continue
+              change = "added" if old is None else "removed" if new is None else "changed"
+              rows.append(
+                  "| "
+                  + " | ".join(
+                      (
+                          f"`{cell(key[0])}`",
+                          f"`{cell(key[1])}`",
+                          change,
+                          transition(old and old.get("version"), new and new.get("version")),
+                          transition(old and old.get("license"), new and new.get("license")),
+                          transition(old and old.get("origin"), new and new.get("origin")),
+                          transition(old and old.get("aportsCommit"), new and new.get("aportsCommit")),
+                          transition(old and old.get("sha256"), new and new.get("sha256")),
+                      )
+                  )
+                  + " |"
+              )
+
+          old_alpine = before["alpine"]
+          new_alpine = after["alpine"]
+          output = [
+              "## Dependency and license diff",
+              "",
+              f"Alpine: {transition(old_alpine.get('version'), new_alpine.get('version'))}",
+              f"ISO SHA-256: {transition(old_alpine.get('isoSha256'), new_alpine.get('isoSha256'))}",
+              "",
+          ]
+          if rows:
+              output.extend(
+                  (
+                      "| Package | Role | Change | Version | License | Origin | aports commit | Artifact SHA-256 |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                      *rows,
+                  )
+              )
+          else:
+              output.append("No package-level changes; only Alpine distribution metadata changed.")
+          output.append("")
+          Path(sys.argv[3]).write_text("\n".join(output), encoding="utf-8")
+          PY
+
+          cat "$RUNNER_TEMP/dependency-diff.md"
+
+      - name: Commit candidate on a validation branch
+        id: candidate
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          alpine_version=$(python3 - <<'PY'
+          from pathlib import Path
+
+          for line in Path("config/alpine.env").read_text().splitlines():
+              if line.startswith("ALPINE_VERSION="):
+                  print(line.split("=", 1)[1].strip().strip("'\""))
+                  break
+          PY
+          )
+
+          if [[ ! $alpine_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid ALPINE_VERSION: $alpine_version" >&2
+            exit 1
+          fi
+
+          branch="automation/alpine-${alpine_version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          subject="chore(deps): refresh Alpine ${alpine_version} assets"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$branch"
+          git add config/alpine.env config/packages.lock.json
+          if git diff --cached --quiet; then
+            echo "Updater reported changes but no dependency files were staged." >&2
+            exit 1
+          fi
+          git commit -m "$subject"
+
+          {
+            echo "branch=$branch"
+            echo "subject=$subject"
+            echo "commit=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check source and license metadata
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          shellcheck \
+            script/make_vm_assets \
+            script/make_source_bundle \
+            script/initramfs/*
+          pipx run --spec 'reuse==5.1.1' reuse lint
+          python3 -m compileall -q compliance script
+          ./script/make_vm_assets --self-test
+          python3 script/update_dependencies.py --self-test
+          python3 -m unittest discover -s compliance/tests -v
+
+      - name: Build candidate VM assets
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          ./script/make_vm_assets \
+            --config config/alpine.env \
+            --lock config/packages.lock.json \
+            --output build \
+            --cache-dir build/cache
+
+      - name: Build candidate corresponding source
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          ./script/make_source_bundle \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --output build/release/vm_assets-sources.tar.zst
+
+      - name: Build candidate compliance payload
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python3 compliance/build_compliance.py \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --asset-dir build/assets
+
+      - name: Verify candidate distribution
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python3 compliance/verify_compliance.py \
+            --lock config/packages.lock.json \
+            --build-dir build \
+            --asset-dir build/assets \
+            --source-bundle build/release/vm_assets-sources.tar.zst
+
+      - name: Smoke-test candidate aarch64 boot
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e
+          timeout --signal=TERM 45s qemu-system-aarch64 \
+            -machine virt \
+            -cpu cortex-a57 \
+            -smp 2 \
+            -m 512M \
+            -nographic \
+            -no-reboot \
+            -kernel build/assets/Image-lts \
+            -initrd build/assets/initramfs-rtpvm-lts \
+            -append "console=ttyAMA0 rdinit=/sbin/init panic=-1" \
+            2>&1 | tee build/qemu-smoke.log
+          qemu_status=${PIPESTATUS[0]}
+          set -e
+
+          if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
+            echo "QEMU exited unexpectedly with status $qemu_status" >&2
+            exit "$qemu_status"
+          fi
+
+          grep -Fq "rtpvm-rcS: early boot setup finished" build/qemu-smoke.log
+
+      - name: Push validated candidate and open pull request
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        env:
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.candidate.outputs.branch }}
+          CANDIDATE_COMMIT: ${{ steps.candidate.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+          SUBJECT: ${{ steps.candidate.outputs.subject }}
+        run: |
+          if [[ -z $BRANCH || -z $SUBJECT || -z $CANDIDATE_COMMIT ]]; then
+            echo "Candidate commit metadata is missing." >&2
+            exit 1
+          fi
+          if [[ $(git rev-parse HEAD) != "$CANDIDATE_COMMIT" ]]; then
+            echo "Validated HEAD no longer matches the candidate commit." >&2
+            exit 1
+          fi
+          git diff --exit-code
+          git push --set-upstream origin "$BRANCH"
+
+          printf '%s\n' \
+            "Refreshes the pinned Alpine release and APK dependency closure." \
+            "" \
+            "The workflow built the binary archive and corresponding-source archive," \
+            "validated license/SBOM provenance, and completed the QEMU aarch64 boot smoke test." \
+            "" \
+            "Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > "$RUNNER_TEMP/pr-body.md"
+          printf '\n' >> "$RUNNER_TEMP/pr-body.md"
+          cat "$RUNNER_TEMP/dependency-diff.md" >> "$RUNNER_TEMP/pr-body.md"
+
+          gh pr create \
+            --base "$BASE_BRANCH" \
+            --head "$BRANCH" \
+            --title "$SUBJECT" \
+            --body-file "$RUNNER_TEMP/pr-body.md"

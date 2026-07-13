@@ -42,6 +42,119 @@ extras.
 - Do not delete or replace a source bundle while its matching binary Release
   remains published.
 
+## Agent-Driven Update-and-Release Runbook
+
+### Authority boundary
+
+- Perform this runbook's external writes only when the user explicitly asks
+  for the complete dependency **update-and-release** operation. That request
+  authorizes dispatching both workflows, reviewing and merging the one PR
+  created by the updater, and publishing the resulting Release through the
+  release workflow.
+- A stage-specific request authorizes only that stage. In particular, an
+  explicit dependency-update request authorizes dispatching
+  `.github/workflows/update-dependencies.yml` and allowing it to create its
+  validated PR, but not merging that PR or publishing a Release. An explicit
+  release request authorizes `.github/workflows/release.yml` for the current
+  validated default branch, but not a dependency update or PR merge. Requests
+  only to inspect versions, check whether an update exists, or explain the
+  process remain read-only.
+- The full-operation authority does not permit bypassing branch protection,
+  force-pushing, manually publishing an incomplete draft, deleting or
+  replacing tags/Releases, or making unrelated code changes. Stop and report
+  whenever one of those actions would be required.
+- Never add or enable a schedule. `Update dependencies` and
+  `Release VM assets` must remain `workflow_dispatch`-only workflows.
+
+### Update and merge
+
+1. Record the current default-branch commit and confirm no earlier update or
+   release workflow is still running. Dispatch `Update dependencies` against
+   the default branch and identify the newly created run unambiguously; do not
+   attach to a pre-existing run merely because it has the same workflow name.
+2. Wait for the run to finish and require `conclusion=success`. If its
+   `Detect dependency changes` step reports `changed=false`, the operation is
+   complete: no PR was created, so do not merge anything and do not create a
+   Release for the unchanged lock.
+3. When changes exist, obtain the PR URL created by that exact workflow run.
+   Confirm that the PR targets the default branch, comes from its
+   `automation/alpine-...` branch, and changes only `config/alpine.env` and
+   `config/packages.lock.json`.
+4. Review the generated dependency/license diff. Verify the Alpine version,
+   ISO checksum, package versions, licenses, origins, aports commits, artifact
+   checksums, runtime/kernel roles, and package additions/removals. Treat any
+   unexplained license or provenance change as blocking.
+5. Require both the completed `Update dependencies` run and every required PR
+   check, including `Verify VM assets`, to succeed for the PR head commit.
+   Never merge a pending, skipped, cancelled, stale, or failing validation.
+6. Squash-merge the validated PR using its Angular-style subject and delete
+   the automation branch. Do not use an administrator bypass. Record the new
+   default-branch commit produced by the merge.
+7. Wait for the push-triggered `Verify VM assets` run on that exact merged
+   default-branch commit. Require `conclusion=success`; a successful PR run is
+   not a substitute for this post-merge main verification.
+
+### Select and publish the tag
+
+1. Re-read `ALPINE_VERSION` from `config/alpine.env` at the verified merged
+   commit and require `major.minor.patch` format. Immediately before release
+   dispatch, confirm the default branch still points to that same verified
+   commit; if it moved, stop and verify the new commit before recalculating.
+2. List all GitHub Releases, including drafts, and repository tags matching
+   `alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate revision numbers, a tag
+   without its corresponding Release, a Release without its tag, or any
+   malformed matching name.
+3. Choose the next tag deterministically:
+   - If no Release exists for the merged `ALPINE_VERSION`, use
+     `alpine-<ALPINE_VERSION>-r1`, even when older Alpine versions have
+     Releases.
+   - If Releases already exist for the same Alpine version, use one greater
+     than the largest existing revision: `max(r<N>) + 1`.
+   - Exception for retrying this runbook: if its failed release attempt left a
+     draft at the intended next tag and that draft targets the same verified
+     commit, reuse that tag. Do not increment merely because the failed draft
+     exists.
+4. Dispatch `Release VM assets` against the default branch with the chosen
+   `tag` input. Wait for the exact new run and require
+   `conclusion=success`. The workflow must check out the previously verified
+   commit; a moved target is blocking.
+5. Confirm from the run that `Ensure draft Release at the checked-out commit`
+   succeeded before any upload, and that `Upload, read back, and publish the
+   draft` succeeded. This proves the workflow created/reused a draft, uploaded
+   the assets, downloaded them again, checked `SHA256SUMS`, byte-compared the
+   readback, and only then published it.
+6. Independently read the final Release and require all of the following:
+   - `targetCommitish` is the verified merged default-branch commit.
+   - `isDraft` is `false`.
+   - The asset allowlist contains exactly five non-empty files and no others:
+     `vm_assets.zip`, `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
+     `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.
+   - A fresh download of all five files passes `sha256sum --check SHA256SUMS`.
+   Report the published tag, Release URL, target commit, and five asset names.
+
+### Failure handling
+
+- If the update workflow fails or is cancelled, do not create/merge a PR or
+  start a Release. Report the first failing step and its relevant log.
+- If the updater reports no change, stop successfully without releasing.
+- If PR scope, provenance review, or any PR check fails, leave the PR unmerged
+  and do not release. Never weaken a check or edit the generated lock by hand
+  to force it through.
+- If merge is blocked, stop rather than bypassing protection. If the merged
+  default-branch verification fails, keep the merge but do not tag or release.
+- A release failure may leave a draft and tag. Never manually publish that
+  draft, delete it, replace it, or advance to another revision to conceal the
+  failure. Inspect its `isDraft`, target commit, and assets. The same workflow
+  and tag may be retried only when the draft still targets the verified commit
+  and the failure was transient or has been corrected within the user's
+  authorized scope. Otherwise stop and report the draft URL and exact failure.
+- If a release is unexpectedly already published, targets another commit, has
+  an unexpected asset, or has an ambiguous tag/draft state, make no mutation
+  and stop for user direction.
+- Treat timeouts and lost run identifiers as ambiguous state: read back the
+  workflow, PR, tag, and Release state before deciding. Never infer success
+  from a partially completed run and never dispatch duplicate runs blindly.
+
 ## Minimum Verification
 
 - Run shell syntax checks, ShellCheck, and `reuse lint`.

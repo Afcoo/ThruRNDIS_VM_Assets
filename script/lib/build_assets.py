@@ -727,7 +727,7 @@ def main() -> int:
     copied_modules, builtin_seeds = copy_module_closure(
         module_dir, root, kernel_release, env["KERNEL_MODULES"].split(), owners,
     )
-    initramfs = assets / f"initramfs-rtpvm-{kernel_flavor}"
+    initramfs = assets / f"initramfs-thrurndis-{kernel_flavor}"
     write_initramfs(root, initramfs)
 
     # Restrict the map to final archive paths so overwritten package files do
@@ -772,7 +772,7 @@ def main() -> int:
     write_json(provenance / "kernel.json", kernel_json)
     write_json(provenance / "file-map.json", file_map)
 
-    print("Prepared locked Alpine RTPVM assets:")
+    print("Prepared locked Alpine ThruRNDIS assets:")
     print(f"  Kernel:          {image}")
     print(f"  Initramfs:       {initramfs}")
     print(f"  Kernel release:  {kernel_release}")

@@ -64,7 +64,7 @@ layout:
 ```text
 vm_assets/
 ├── Image-lts
-├── initramfs-rtpvm-lts
+├── initramfs-thrurndis-lts
 ├── manifest.json
 ├── SHA256SUMS
 └── compliance/

@@ -220,7 +220,7 @@ class ComplianceTests(unittest.TestCase):
                 "etc/init.d/rcS": (stat.S_IFREG | 0o755, b"#!/bin/sh\n"),
                 module_path: (stat.S_IFREG | 0o644, b"kernel module"),
             }
-            initramfs = assets / "initramfs-rtpvm-lts"
+            initramfs = assets / "initramfs-thrurndis-lts"
             initramfs.write_bytes(make_newc(init_files))
             image = assets / "Image-lts"
             image.write_bytes(b"Linux Image")

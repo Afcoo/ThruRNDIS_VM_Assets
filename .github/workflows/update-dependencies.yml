@@ -236,7 +236,7 @@ jobs:
             -no-reboot \
             -nic none \
             -kernel build/assets/Image-lts \
-            -initrd build/assets/initramfs-rtpvm-lts \
+            -initrd build/assets/initramfs-thrurndis-lts \
             -append "console=ttyAMA0 rdinit=/sbin/init panic=-1" \
             2>&1 | tee build/qemu-smoke.log
           qemu_status=${PIPESTATUS[0]}
@@ -247,7 +247,7 @@ jobs:
             exit "$qemu_status"
           fi
 
-          grep -Fq "rtpvm-rcS: early boot setup finished" build/qemu-smoke.log
+          grep -Fq "thrurndis-rcS: early boot setup finished" build/qemu-smoke.log
 
       - name: Push validated candidate and open pull request
         if: steps.changes.outputs.changed == 'true'

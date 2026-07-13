@@ -6,10 +6,57 @@ SPDX-License-Identifier: GPL-2.0-or-later
 # ThruRNDIS VM Assets
 
 This repository builds the minimal Alpine Linux `aarch64` kernel and initramfs
-used by ThruRNDIS. The builder runs on Linux and records the exact Alpine ISO,
-APK, kernel-module, source, and license provenance used for every distribution.
-It does not build the macOS application and never creates WireGuard keys or
-configuration files.
+used by [ThruRNDIS](https://github.com/Afcoo/ThruRNDIS). The builder runs on
+Linux and records the exact Alpine ISO, APK, kernel-module, source, and license
+provenance used for every distribution. It does not build the macOS application
+and never creates WireGuard keys or configuration files.
+
+## Role in ThruRNDIS
+
+ThruRNDIS does not bundle or build these Linux assets. Users download
+`vm_assets.zip` from this repository's Releases, verify it with the attached
+`SHA256SUMS`, extract it, and select the resulting `vm_assets` folder in the
+app. The app passes `Image-lts` to `VZLinuxBootLoader` as the guest kernel and
+`initramfs-thrurndis-lts` as its initial RAM disk. The initramfs supplies the
+entire RAM-backed guest userspace; an optional user-managed scratch disk is
+separate and does not replace the initramfs root.
+
+Inside ThruRNDIS, the guest built here is the forwarding boundary for this IPv4
+data path:
+
+```text
+macOS WireGuard client
+-> VZNAT guest endpoint
+-> guest wg0
+-> guest policy routing and nftables masquerade
+-> USB RNDIS usb0
+```
+
+WireGuard keys and configuration are deliberately outside the release assets.
+The macOS app creates `Shared/wg0.conf` and exposes only that file's directory
+to the guest through the read-only `thrurndis-wireguard` VirtioFS share. This
+keeps persistent secrets and user configuration under app ownership while the
+initramfs owns guest boot, device preparation, and packet forwarding.
+
+### Initramfs boot responsibilities
+
+`script/lib/build_assets.py` embeds the files in `script/initramfs/` and writes
+the BusyBox `inittab` that runs them. These are guest-side programs baked into
+the initramfs; the macOS app does not execute them on the host.
+
+| BusyBox init action | Script | Responsibility inside the guest |
+| --- | --- | --- |
+| `::sysinit` | `rcS` | Mount early filesystems, create device and console state, initialize `mdev`, load console and kernel-command-line modules, and prepare the RAM-backed shell environment. |
+| `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
+| `::wait` | `init-virtiofs-wgconf` | Load `virtiofs`, mount `thrurndis-wireguard` read-only at `/run/thrurndis-wireguard`, and require a nonempty `wg0.conf`. |
+| `::once` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report `THRURNDIS_WG_ENDPOINT=<guest-nat-ip>:<listen-port>`, and start `wg0` from the shared configuration. |
+| `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
+| watcher helper | `wg0-usb0-gateway` | Acquire `usb0` DHCP, derive the source prefix from the live `wg0` CIDR, install source policy routing through the RNDIS gateway, enable IPv4 forwarding, and maintain the scoped `wg0`-to-`usb0` nftables rules. |
+| `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
+
+The split is intentional: boot-time RNDIS module preparation must not depend on
+`usb0` already existing, while the respawned watcher must tolerate USB devices
+appearing late, disconnecting, or reconnecting during a VM session.
 
 ## License model
 

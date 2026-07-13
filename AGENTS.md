@@ -14,6 +14,62 @@ extras.
 - Keep the build Linux-only. Do not add a macOS or Xcode job.
 - Do not add scheduled workflows. Dependency updates and releases are manual.
 
+## Role in ThruRNDIS
+
+- This repository is the production and release owner for the Linux kernel,
+  initramfs, guest userspace, kernel-module closure, and guest init scripts
+  consumed by [Afcoo/ThruRNDIS](https://github.com/Afcoo/ThruRNDIS).
+- The ThruRNDIS app does not bundle or build these assets. Its baseline user
+  flow downloads `vm_assets.zip` from this repository's Releases, verifies the
+  attached `SHA256SUMS`, extracts it, and selects the `vm_assets` folder. The
+  app uses `Image-lts` as the `VZLinuxBootLoader` kernel and
+  `initramfs-thrurndis-lts` as the initial RAM disk. A user-managed scratch disk
+  is optional and separate from the RAM-backed initramfs root.
+- The guest is the packet-forwarding boundary for `macOS WireGuard client ->
+  VZNAT guest endpoint -> guest wg0 -> policy routing and nftables masquerade ->
+  USB RNDIS usb0`. The app does not forward packet payloads itself.
+- WireGuard keys and configuration belong to the macOS app, not to this asset
+  repository. The app exposes only its generated `Shared/wg0.conf` directory
+  through the read-only `thrurndis-wireguard` VirtioFS share. Never add private
+  keys, WireGuard configuration, fixed WireGuard ports, or fixed overlay CIDRs
+  to `vm_assets.zip`, the source bundle, manifests, examples, or build inputs.
+
+### Guest init contract
+
+`script/lib/build_assets.py` installs `script/initramfs/*` into the initramfs
+and writes the BusyBox `inittab`. These scripts execute inside the Linux guest;
+they are not host-side setup scripts and are not run by the macOS app.
+
+- `rcS` (`::sysinit`) mounts the early filesystems, creates device and console
+  state, initializes `mdev`, loads console and kernel-command-line modules, and
+  prepares the RAM-backed shell environment.
+- `init-rndis` (`::wait`) loads the XHCI, USB networking, and RNDIS host modules
+  and rescans devices. Keep this boot-time preparation separate from the
+  watcher so it does not depend on `usb0` already existing.
+- `init-virtiofs-wgconf` (`::wait`) loads `virtiofs`, mounts the
+  `thrurndis-wireguard` share read-only at `/run/thrurndis-wireguard`, and
+  requires a nonempty `wg0.conf` before the network one-shot starts.
+- `init-network` (`::once`) configures the VZNAT NIC `eth0` with DHCP, reads the
+  runtime `ListenPort`, emits
+  `THRURNDIS_WG_ENDPOINT=<guest-nat-ip>:<listen-port>`, and starts `wg0` from
+  `/run/thrurndis-wireguard/wg0.conf`.
+- `usb0-watcher` (`::respawn`) watches the fixed RNDIS interface `usb0`, retries
+  gateway setup when the interface appears or its state becomes incomplete,
+  and clears stale gateway state when the interface disappears. It must remain
+  tolerant of late USB attachment, detach, and reconnect.
+- `wg0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
+  obtains `usb0` DHCP, derives the policy source from the live `wg0` connected
+  IPv4 CIDR, installs source policy routing through the RNDIS gateway, enables
+  IPv4 forwarding, and owns the narrow `wg0`-to-`usb0` nftables forwarding and
+  masquerade rules.
+- `init-console` (`hvc0::respawn`) attaches the interactive shell to the virtio
+  console and restores it when the shell exits.
+
+Keep the inittab wiring and these responsibility boundaries synchronized with
+the scripts. In particular, do not fold RNDIS module preparation into the
+runtime watcher, do not make the one-shot wait for `usb0`, and do not embed the
+app-owned WireGuard configuration into the initramfs.
+
 ## Build and Provenance Rules
 
 - Normal builds and releases consume `config/packages.lock.json`; only the

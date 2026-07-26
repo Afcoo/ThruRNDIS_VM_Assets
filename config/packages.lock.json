@@ -1,8 +1,8 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "9d7e6698a11a5e7b1aaad4f8656cc03b1ccfda7de8f23944beefe744b030624b",
-      "main": "b36a31b80b5347605513eb7790d863b32cebe873604072be33e268e98ca99ca1"
+      "community": "9b31760e1c7881d16b6f95c7fd64eca8f7ceb6df7332bfe7fabda642fe58bdea",
+      "main": "a08cb00035f10003c627cfacbcdcaef89f7c9c2e0682cb6c78cc28afdeb859d8"
     },
     "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
     "arch": "aarch64",

@@ -27,6 +27,7 @@ from common import (
     load_json,
     load_lock,
     load_policy,
+    load_vm_asset_config,
     normalize_license,
     read_newc,
     sha256_file,
@@ -449,6 +450,7 @@ def build_manifest(
     licenses: dict[str, str],
     asset_dir: Path,
     provenance_dir: Path,
+    asset_version: int,
     builder_commit: str,
     epoch: int,
 ) -> dict[str, Any]:
@@ -462,6 +464,7 @@ def build_manifest(
         provenance[filename] = {"sha256": sha256_file(path), "size": path.stat().st_size}
     return {
         "schemaVersion": 1,
+        "assetVersion": asset_version,
         "created": iso_timestamp(epoch),
         "builder": {"repository": REPOSITORY_URL, "commit": builder_commit},
         "alpine": lock["alpine"],
@@ -489,6 +492,7 @@ def run(arguments: argparse.Namespace) -> None:
     archive = (arguments.archive or build_dir / "release/vm_assets.zip").resolve()
     repo = arguments.repo.resolve()
     lock, packages = load_lock(arguments.lock.resolve())
+    asset_config = load_vm_asset_config(repo / "config/vm-assets.json")
     policy = load_policy(arguments.policy.resolve())
     licenses = normalized_licenses(packages, policy)
     required_origins = set(policy.get("required_source_origins", []))
@@ -537,7 +541,16 @@ def run(arguments: argparse.Namespace) -> None:
     commit = git_commit(repo)
     epoch = source_date_epoch(repo)
     write_json(compliance_dir / "sbom.spdx.json", make_sbom(lock, packages, licenses, commit, epoch))
-    manifest = build_manifest(lock, packages, licenses, asset_dir, provenance_dir, commit, epoch)
+    manifest = build_manifest(
+        lock,
+        packages,
+        licenses,
+        asset_dir,
+        provenance_dir,
+        asset_config["assetVersion"],
+        commit,
+        epoch,
+    )
     write_json(asset_dir / "manifest.json", manifest)
     checksums = checksum_manifest(asset_dir, exclude=("SHA256SUMS",))
     write_text(asset_dir / "SHA256SUMS", "".join(f"{digest}  {relative}\n" for digest, relative in checksums))

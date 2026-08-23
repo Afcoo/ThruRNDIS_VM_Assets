@@ -195,6 +195,16 @@ def load_lock(path: Path) -> tuple[dict[str, Any], list[Package]]:
     return raw, packages
 
 
+def load_vm_asset_config(path: Path) -> dict[str, Any]:
+    raw = load_json(path)
+    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
+        raise ComplianceError(f"{path}: schemaVersion must be 1")
+    version = raw.get("assetVersion")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ComplianceError(f"{path}: assetVersion must be a positive integer")
+    return raw
+
+
 def load_policy(path: Path) -> dict[str, Any]:
     try:
         if tomllib is not None:

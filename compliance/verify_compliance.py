@@ -29,6 +29,7 @@ from common import (
     load_json,
     load_lock,
     load_policy,
+    load_vm_asset_config,
     normalize_license,
     parse_pkginfo,
     read_newc,
@@ -58,6 +59,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--asset-dir", type=Path)
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--source-bundle", type=Path)
+    parser.add_argument("--repo", type=Path, default=root)
     return parser.parse_args()
 
 
@@ -100,11 +102,14 @@ def verify_manifest(
     packages: Sequence[Package],
     provenance_dir: Path,
     licenses: Mapping[str, str],
+    asset_version: int,
 ) -> None:
     manifest_path = asset_dir / "manifest.json"
     manifest = load_json(manifest_path)
     if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1:
         raise ComplianceError(f"{manifest_path}: unsupported schema")
+    if manifest.get("assetVersion") != asset_version:
+        raise ComplianceError(f"{manifest_path}: assetVersion differs from config")
     if manifest.get("alpine") != lock["alpine"]:
         raise ComplianceError(f"{manifest_path}: Alpine metadata differs from lock")
     builder = manifest.get("builder")
@@ -366,6 +371,8 @@ def verify_source_bundle(
             raise ComplianceError("binary manifest has no builder object")
         if manifest.get("builderCommit") != binary_builder.get("commit"):
             raise ComplianceError("source and binary builder commits differ")
+        if manifest.get("assetVersion") != binary_manifest.get("assetVersion"):
+            raise ComplianceError("source and binary asset versions differ")
         if manifest.get("alpine") != binary_manifest.get("alpine") or manifest.get("alpine") != lock.get("alpine"):
             raise ComplianceError("source, binary, and lock Alpine metadata differ")
         rows = manifest.get("files")
@@ -406,12 +413,19 @@ def verify_source_bundle(
         }
         if set(declared) != actual:
             raise ComplianceError("source manifest inventory differs from archive")
-        for required in ("BUILDING.md", "builder/config/packages.lock.json"):
+        for required in (
+            "BUILDING.md",
+            "builder/config/packages.lock.json",
+            "builder/config/vm-assets.json",
+        ):
             if required not in actual:
                 raise ComplianceError(f"source bundle is missing {required}")
         bundled_lock = load_json(root / "builder/config/packages.lock.json")
         if bundled_lock != lock:
             raise ComplianceError("builder source contains a dependency lock different from the binary lock")
+        bundled_asset_config = load_vm_asset_config(root / "builder/config/vm-assets.json")
+        if bundled_asset_config["assetVersion"] != binary_manifest.get("assetVersion"):
+            raise ComplianceError("builder source and binary asset versions differ")
 
         sources = load_json(root / "SOURCES.json")
         if not isinstance(sources, dict) or sources.get("schemaVersion") != 1:
@@ -524,6 +538,8 @@ def run(arguments: argparse.Namespace) -> None:
     asset_dir = (arguments.asset_dir or build_dir / "assets").resolve()
     archive = (arguments.archive or build_dir / "release/vm_assets.zip").resolve()
     lock, packages = load_lock(arguments.lock.resolve())
+    repo = arguments.repo.resolve()
+    asset_config = load_vm_asset_config(repo / "config/vm-assets.json")
     policy = load_policy(arguments.policy.resolve())
     licenses = {package.name: normalize_license(package.license_expression, policy) for package in packages}
 
@@ -553,7 +569,14 @@ def run(arguments: argparse.Namespace) -> None:
         file_map,
     )
 
-    verify_manifest(asset_dir, lock, packages, provenance_dir, licenses)
+    verify_manifest(
+        asset_dir,
+        lock,
+        packages,
+        provenance_dir,
+        licenses,
+        asset_config["assetVersion"],
+    )
     binary_manifest = load_json(asset_dir / "manifest.json")
     if not isinstance(binary_manifest, dict):
         raise ComplianceError("binary manifest is not an object")

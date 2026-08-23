@@ -146,6 +146,16 @@ vm_assets/
     └── licenses/<origin>/...
 ```
 
+`manifest.json` contains an integer `assetVersion` sourced from
+`config/vm-assets.json`. This is the consumer-visible compatibility version of
+the VM asset layout and contract; it is separate from both the manifest's
+`schemaVersion` and the Alpine version. Increment it only for incompatible
+changes such as required file/layout changes or breaking host/guest boot and
+control-contract changes. Alpine or APK refreshes, rebuilds, and additive
+backward-compatible metadata do not increment it. Consumers must treat a
+missing value as an unversioned legacy asset and accept only format versions
+they explicitly support.
+
 The build is intentionally lock-driven. It does not silently select newer
 packages. To propose an Alpine or APK refresh, run the **Update dependencies**
 workflow manually; it verifies the candidate distribution and opens a pull

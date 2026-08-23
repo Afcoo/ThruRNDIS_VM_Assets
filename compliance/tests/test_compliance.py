@@ -29,6 +29,7 @@ from common import (  # noqa: E402
     ComplianceError,
     check_initramfs_content,
     load_policy,
+    load_vm_asset_config,
     normalize_license,
     sha256_file,
     write_json,
@@ -78,6 +79,20 @@ class ComplianceTests(unittest.TestCase):
         policy = load_policy(self.policy_path)
         for package in lock["packages"]:
             normalize_license(package["license"], policy)
+
+    def test_current_asset_version_is_positive(self) -> None:
+        config = load_vm_asset_config(ROOT / "config/vm-assets.json")
+        self.assertEqual(config["assetVersion"], 1)
+
+    def test_asset_version_rejects_non_positive_integers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "vm-assets.json"
+            for value in (None, True, 0, -1, "1"):
+                path.write_text(json.dumps({"schemaVersion": 1, "assetVersion": value}))
+                with self.subTest(value=value), self.assertRaisesRegex(
+                    ComplianceError, "assetVersion must be a positive integer"
+                ):
+                    load_vm_asset_config(path)
 
     def test_current_inputs_exclude_legacy_wireguard_payloads(self) -> None:
         lock = json.loads((ROOT / "config/packages.lock.json").read_text())
@@ -349,6 +364,8 @@ class ComplianceTests(unittest.TestCase):
             shutil.copyfile(ROOT / "LICENSES/GPL-2.0-or-later.txt", repo / "LICENSES/GPL-2.0-or-later.txt")
             (repo / "config").mkdir()
             (repo / "config/packages.lock.json").write_text(json.dumps(lock))
+            asset_config = {"schemaVersion": 1, "assetVersion": 1}
+            (repo / "config/vm-assets.json").write_text(json.dumps(asset_config))
             subprocess.run(["git", "init", "-q", repo], check=True)
             subprocess.run(["git", "-C", repo, "config", "user.name", "Test"], check=True)
             subprocess.run(["git", "-C", repo, "config", "user.email", "test@example.invalid"], check=True)
@@ -375,10 +392,31 @@ class ComplianceTests(unittest.TestCase):
                     asset_dir=assets,
                     archive=build / "release/vm_assets.zip",
                     source_bundle=None,
+                    repo=repo,
                 )
             )
+            manifest = json.loads((assets / "manifest.json").read_text())
+            self.assertEqual(manifest["assetVersion"], 1)
             self.assertTrue((assets / "compliance/sbom.spdx.json").is_file())
             self.assertTrue((build / "release/vm_assets.zip").is_file())
+
+            manifest_path = assets / "manifest.json"
+            original_manifest = manifest_path.read_text()
+            manifest["assetVersion"] = 2
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ComplianceError, "assetVersion differs from config"):
+                verify_compliance.run(
+                    SimpleNamespace(
+                        lock=lock_path,
+                        policy=self.policy_path,
+                        build_dir=build,
+                        asset_dir=assets,
+                        archive=build / "release/vm_assets.zip",
+                        source_bundle=None,
+                        repo=repo,
+                    )
+                )
+            manifest_path.write_text(original_manifest)
 
             if shutil.which("zstd") is None:
                 return
@@ -387,6 +425,7 @@ class ComplianceTests(unittest.TestCase):
             (source_root / "builder/config").mkdir(parents=True)
             shutil.copyfile(repo / "LICENSES/GPL-2.0-or-later.txt", source_root / "builder/LICENSES/GPL-2.0-or-later.txt")
             shutil.copyfile(repo / "config/packages.lock.json", source_root / "builder/config/packages.lock.json")
+            shutil.copyfile(repo / "config/vm-assets.json", source_root / "builder/config/vm-assets.json")
             (source_root / "packages").mkdir()
             shutil.copyfile(
                 provenance / "packages/busybox-1.0-r0.PKGINFO",
@@ -439,6 +478,7 @@ class ComplianceTests(unittest.TestCase):
                 source_root / "SOURCE_MANIFEST.json",
                 {
                     "schemaVersion": 1,
+                    "assetVersion": 1,
                     "created": "1970-01-01T00:00:00Z",
                     "builderCommit": commit,
                     "alpine": lock["alpine"],
@@ -458,6 +498,7 @@ class ComplianceTests(unittest.TestCase):
                     asset_dir=assets,
                     archive=build / "release/vm_assets.zip",
                     source_bundle=source_bundle,
+                    repo=repo,
                 )
             )
 

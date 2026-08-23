@@ -20,6 +20,7 @@ HOST_LINK_GUEST_IPV4=192.168.100.1
 HOST_LINK_GUEST_CIDR=192.168.100.1/24
 HOST_LINK_HOST_IPV4=192.168.100.2
 HOST_LINK_HOST_CIDR=192.168.100.2/32
+PORT_FORWARDING_MODULE=/usr/local/libexec/thrurndis/port-forwarding
 
 log() {
     echo "thrurndis-gateway: $*" >/dev/kmsg 2>/dev/null || true
@@ -33,6 +34,13 @@ log_console() {
         echo "thrurndis-gateway: $*" >&2
     fi
 }
+
+if [ ! -r "$PORT_FORWARDING_MODULE" ]; then
+    log_console "missing port forwarding module $PORT_FORWARDING_MODULE"
+    exit 1
+fi
+# shellcheck source=/usr/local/libexec/thrurndis/port-forwarding
+. "$PORT_FORWARDING_MODULE"
 
 announce_route_ready() {
     log_console "THRURNDIS_RNDIS_ROUTE_READY=$1"
@@ -297,8 +305,17 @@ install_policy_route() {
 install_nftables() {
     rndis_dns=$1
 
+    if ! thrurndis_pf_prepare_nft_rules; then
+        log_console "refusing to install nftables with invalid port forwarding boot configuration"
+        thrurndis_pf_announce_error_state invalid-state || true
+        return 1
+    fi
+
     if ! command -v nft >/dev/null 2>&1; then
         log_console "nft not found; skipping host-link-to-RNDIS masquerade"
+        if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
+            thrurndis_pf_announce_error_state nft-unavailable || true
+        fi
         return 1
     fi
 
@@ -309,28 +326,45 @@ install_nftables() {
 table ip $NFT_TABLE {
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
+        $THRURNDIS_PF_PREROUTING_RULES
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 udp dport 53 dnat to $rndis_dns
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 tcp dport 53 dnat to $rndis_dns
     }
 
     chain forward {
         type filter hook forward priority 0; policy drop;
+        $THRURNDIS_PF_FORWARD_RULES
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" accept
         ip daddr $HOST_LINK_HOST_CIDR iifname "$RNDIS_IFACE" oifname "$INGRESS_IFACE" ct state established,related accept
     }
 
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
+        $THRURNDIS_PF_POSTROUTING_RULES
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" masquerade
     }
 }
 EOF_NFT
     then
+        if ! thrurndis_pf_rules_ready >/tmp/thrurndis-pf-rules.err 2>&1; then
+            output=$($BB tail -n 8 /tmp/thrurndis-pf-rules.err 2>/dev/null | $BB tr '\n' ' ' || true)
+            log_console "TCP and UDP port forwarding rule status is incomplete after nftables setup: ${output}"
+            if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
+                thrurndis_pf_announce_error_state rule-status || true
+            fi
+            return 1
+        fi
         log_console "configured nftables host-link-to-RNDIS masquerade and DNS proxy: $HOST_LINK_HOST_CIDR on $INGRESS_IFACE, $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53 on $RNDIS_IFACE"
+        if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
+            log_console "configured TCP and UDP port forwarding: $RNDIS_IFACE:$THRURNDIS_PF_EXTERNAL_PORT -> $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT"
+        fi
         return 0
     fi
 
     log_console "failed to configure nftables host-link-to-RNDIS masquerade"
+    if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
+        thrurndis_pf_announce_error_state nft-install || true
+    fi
     return 1
 }
 
@@ -352,6 +386,7 @@ gateway_up() {
     # Withdraw host /1 routes while state is being rebuilt. A later =1 marker
     # is emitted only after the policy route, forwarding, and NAT all succeed.
     announce_route_ready 0
+    thrurndis_pf_announce_pending_state || true
     clear_gateway_state
 
     if ! wait_for_interface "$INGRESS_IFACE" 1; then
@@ -383,9 +418,20 @@ gateway_up() {
         clear_gateway_state
         return 1
     fi
+    if ! gateway_status >/tmp/thrurndis-gateway-status.err 2>&1; then
+        if [ "$THRURNDIS_PF_ENABLED" -eq 1 ] \
+            && ! thrurndis_pf_rules_ready >>/tmp/thrurndis-gateway-status.err 2>&1; then
+            thrurndis_pf_announce_error_state rule-status || true
+        fi
+        output=$($BB tail -n 8 /tmp/thrurndis-gateway-status.err 2>/dev/null | $BB tr '\n' ' ' || true)
+        log_console "gateway status is incomplete after setup: ${output}"
+        clear_gateway_state
+        return 1
+    fi
 
     log_console "gateway ready: host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
     announce_route_ready 1
+    thrurndis_pf_announce_active_state || true
     return 0
 }
 
@@ -394,6 +440,7 @@ gateway_down() {
     : >"$RNDIS_RESOLV_CONF"
     log_console "cleared host-link-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
     announce_route_ready 0
+    thrurndis_pf_announce_pending_state || true
     return 0
 }
 
@@ -492,6 +539,9 @@ gateway_status() {
             $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
             $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
             echo "missing nft masquerade allowlist for host $HOST_LINK_HOST_CIDR"
+            missing=1
+        fi
+        if ! thrurndis_pf_rules_ready; then
             missing=1
         fi
     fi

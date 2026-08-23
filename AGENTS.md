@@ -74,11 +74,29 @@ they are not host-side setup scripts and are not run by the macOS app.
   `192.168.100.1:53` to RNDIS DNS. It emits
   `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
   emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
+- `port-forwarding` is a side-effect-free shell module sourced from the
+  fixed path `/usr/local/libexec/thrurndis/port-forwarding` by
+  `eth0-usb0-gateway`. It parses the optional immutable kernel argument
+  `thrurndis.port_forward=<rndis-port>:<mac-port>`, rejects duplicates,
+  malformed values, leading zeroes, and ports outside `1...65535`, prepares
+  validated nftables rule fragments, reports marker values, and inspects the
+  exact installed rules. It is not an init action or runtime control daemon.
+- Optional TCP and UDP forwarding adds fixed rules to the owned `thrurndis` nftables
+  chains for that VM boot. TCP and UDP packets arriving at `usb0:<rndis-port>` are DNATed to host
+  `192.168.100.2:<mac-port>`, admitted only on `usb0 -> eth0`, and both are SNATed to
+  guest `192.168.100.1`. The guest emits
+  `THRURNDIS_PORT_FORWARD_STATE=inactive`,
+  `pending:<rndis-port>:<mac-port>`, `active:<rndis-port>:<mac-port>`, or
+  `error:<code>` on the system console. Changing the mapping requires a new VM
+  boot.
+- `eth0-usb0-gateway` remains the sole owner and mutator of the complete
+  `thrurndis` nftables table. The sourced module must never invoke `nft` for
+  mutation or install its rules in a separate transaction.
 - Before `usb0` DHCP, `eth0-usb0-gateway` clears `/etc/resolv.conf`; Alpine's
   BusyBox DHCP script then atomically writes the live RNDIS DNS from option 6.
   The gateway accepts only the first value routable as IPv4. Do not hard-code a
   public resolver or treat the earlier VZNAT DHCP resolver as RNDIS upstream.
-- `init-console` (`hvc0::respawn`) attaches the interactive shell to the virtio
+- `init-console` (`hvc0::respawn`) attaches the interactive shell to the Virtio
   console and restores it when the shell exits.
 
 Keep the inittab wiring and these responsibility boundaries synchronized with

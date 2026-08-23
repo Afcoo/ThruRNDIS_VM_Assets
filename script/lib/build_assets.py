@@ -30,6 +30,7 @@ INITRAMFS_SCRIPTS = (
     "rcS", "init-console", "init-rndis", "init-network", "usb0-watcher",
     "eth0-usb0-gateway",
 )
+INITRAMFS_SOURCED_MODULES = ("port-forwarding",)
 
 
 class GuestPathError(ValueError):
@@ -495,7 +496,8 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
     for directory, mode in (
         ("bin", 0o755), ("sbin", 0o755), ("dev", 0o755),
         ("etc/init.d", 0o755), ("root", 0o700), ("run", 0o755),
-        ("tmp", 0o1777), ("usr/local/sbin", 0o755), ("var/log", 0o755),
+        ("tmp", 0o1777), ("usr/local/libexec/thrurndis", 0o755),
+        ("usr/local/sbin", 0o755), ("var/log", 0o755),
     ):
         path = root / directory
         path.mkdir(parents=True, exist_ok=True)
@@ -508,6 +510,12 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
             fail(f"Missing project initramfs script: {source}")
         destination = "etc/init.d/rcS" if name == "rcS" else f"usr/local/sbin/{name}"
         add_file(root, destination, source.read_bytes(), 0o755, "project", owners)
+    for name in INITRAMFS_SOURCED_MODULES:
+        source = SCRIPT_DIR / "initramfs" / name
+        if not source.is_file():
+            fail(f"Missing project initramfs module: {source}")
+        destination = f"usr/local/libexec/thrurndis/{name}"
+        add_file(root, destination, source.read_bytes(), 0o644, "project", owners)
     add_file(root, "etc/resolv.conf", b"", 0o644, "project", owners)
 
 

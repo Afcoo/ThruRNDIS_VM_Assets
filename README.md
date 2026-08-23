@@ -48,6 +48,14 @@ lease and DNATs host UDP/TCP traffic addressed to `192.168.100.1:53` to the
 first RNDIS DNS server. DNS uses the same fixed source allowlist, policy route,
 conntrack return path, and masquerade as other forwarded IPv4 traffic.
 
+Before VM start, the app can optionally append
+`thrurndis.port_forward=<RNDIS port>:<Mac port>` to the kernel command line.
+The sourced `port-forwarding` module validates both ports as canonical
+decimal values in `1...65535` and prepares paired TCP and UDP DNAT, forward, and SNAT rule
+fragments. `eth0-usb0-gateway` includes those fragments in its single owned
+`thrurndis` nftables transaction, mapping both protocols from `usb0:<RNDIS port>` to
+`192.168.100.2:<Mac port>`. The value is immutable for that VM boot.
+
 The machine-readable console contract is line-oriented:
 
 ```text
@@ -55,6 +63,9 @@ THRURNDIS_VZNAT_IPV4=<guest-ipv4>
 THRURNDIS_VZNAT_CIDR=<guest-ipv4/prefix>
 THRURNDIS_VZNAT_GATEWAY=<vznat-gateway-ipv4>
 THRURNDIS_RNDIS_ROUTE_READY=1
+THRURNDIS_PORT_FORWARD_STATE=inactive
+THRURNDIS_PORT_FORWARD_STATE=pending:<rndis-port>:<mac-port>
+THRURNDIS_PORT_FORWARD_STATE=active:<rndis-port>:<mac-port>
 ```
 
 `THRURNDIS_RNDIS_ROUTE_READY=0` is emitted before gateway state is rebuilt and
@@ -63,6 +74,12 @@ VM termination, or loss of the control channel. It may install them through
 `192.168.100.1` only after the marker becomes `1`. WireGuard, its userspace
 tools, kernel module, and the former configuration VirtioFS share are not
 included.
+
+`THRURNDIS_PORT_FORWARD_STATE=error:<code>` reports an invalid boot value or
+failed rule setup. Current codes are `invalid-state`, `nft-unavailable`,
+`nft-install`, and `rule-status`. `pending` means the boot configuration is
+valid but the RNDIS gateway is not ready; `active` is emitted only after the
+matching rules pass the guest's exact status checks.
 
 ### Initramfs boot responsibilities
 
@@ -76,7 +93,8 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
-| watcher helper | `eth0-usb0-gateway` | Clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, maintain scoped nftables rules, and publish readiness changes. |
+| sourced module | `port-forwarding` | Parse and validate the optional fixed paired TCP/UDP mapping from `/proc/cmdline`, prepare rule fragments and marker state, and inspect exact installed rules without mutating nftables. |
+| watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 
 The split is intentional: boot-time RNDIS module preparation must not depend on

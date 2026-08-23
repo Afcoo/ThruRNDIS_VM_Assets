@@ -11,6 +11,7 @@ VZNAT_WAIT_SECONDS=${THRURNDIS_VZNAT_WAIT_SECONDS:-8}
 VZNAT_DHCP_ATTEMPTS=${THRURNDIS_VZNAT_DHCP_ATTEMPTS:-5}
 VZNAT_DHCP_TIMEOUT_SECONDS=${THRURNDIS_VZNAT_DHCP_TIMEOUT_SECONDS:-2}
 VZNAT_DHCP_TOTAL_TIMEOUT_SECONDS=${THRURNDIS_VZNAT_DHCP_TOTAL_TIMEOUT_SECONDS:-16}
+HOST_LINK_GUEST_CIDR=192.168.100.1/24
 
 log() {
     echo "thrurndis-net: $*" >/dev/kmsg 2>/dev/null || true
@@ -102,6 +103,20 @@ interface_default_gateway() {
     '
 }
 
+configure_host_link_ipv4() {
+    iface=$1
+
+    if ip -4 address replace "$HOST_LINK_GUEST_CIDR" dev "$iface" \
+        2>/tmp/thrurndis-host-link-address.err; then
+        log_console "host link $iface IPv4 $HOST_LINK_GUEST_CIDR"
+        return 0
+    fi
+
+    output=$($BB cat /tmp/thrurndis-host-link-address.err 2>/dev/null || true)
+    log_console "failed to configure host link $HOST_LINK_GUEST_CIDR on $iface: ${output}"
+    return 1
+}
+
 configure_vznat_ipv4() {
     iface=$1
     udhcpc_log="/tmp/udhcpc-$iface.log"
@@ -139,9 +154,14 @@ configure_vznat_ipv4() {
     ipv4=${cidr%%/*}
     log_console "VZNAT interface $iface IPv4 $cidr via $gateway"
 
+    if ! configure_host_link_ipv4 "$iface"; then
+        return 1
+    fi
+
     # Host contract: these stable, line-oriented markers describe the runtime
-    # VZNAT lease. The privileged helper uses the guest IPv4 as the next hop
-    # only after THRURNDIS_RNDIS_ROUTE_READY=1 is emitted by the gateway helper.
+    # VZNAT lease used to discover the VM-created bridge. Data traffic instead
+    # uses the fixed host-link addresses on that bridge after the gateway helper
+    # emits THRURNDIS_RNDIS_ROUTE_READY=1.
     log_console "THRURNDIS_VZNAT_IPV4=$ipv4"
     log_console "THRURNDIS_VZNAT_CIDR=$cidr"
     log_console "THRURNDIS_VZNAT_GATEWAY=$gateway"

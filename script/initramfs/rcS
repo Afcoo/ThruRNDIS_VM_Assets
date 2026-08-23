@@ -127,9 +127,9 @@ This environment runs entirely from RAM. Files written here are discarded when
 the VM stops. Select a scratch disk in the host app only if you explicitly want
 temporary block storage attached to the VM.
 
-BusyBox init prepares RNDIS USB modules before acquiring the VZNAT eth0 lease.
-It also respawns usb0-watcher so eth0-to-usb0 routing is recovered when the
-RNDIS interface appears late or reconnects.
+BusyBox init prepares RNDIS USB modules before acquiring the VZNAT eth0 lease
+and adding the 192.168.100.1/24 host link. It also respawns usb0-watcher so
+eth0-to-usb0 routing is recovered when RNDIS appears late or reconnects.
 EOF
 
 if [ -e /proc/sys/kernel/hotplug ] && [ -x /sbin/mdev ]; then

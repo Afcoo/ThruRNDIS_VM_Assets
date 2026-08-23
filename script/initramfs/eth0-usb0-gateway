@@ -16,6 +16,10 @@ RNDIS_DHCP_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TIMEOUT_SECONDS:-2}
 RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS:-6}
 NFT_TABLE=${THRURNDIS_NFT_TABLE:-thrurndis}
 RNDIS_RESOLV_CONF=${THRURNDIS_RNDIS_RESOLV_CONF:-/etc/resolv.conf}
+HOST_LINK_GUEST_IPV4=192.168.100.1
+HOST_LINK_GUEST_CIDR=192.168.100.1/24
+HOST_LINK_HOST_IPV4=192.168.100.2
+HOST_LINK_HOST_CIDR=192.168.100.2/32
 
 log() {
     echo "thrurndis-gateway: $*" >/dev/kmsg 2>/dev/null || true
@@ -95,6 +99,17 @@ interface_ipv4_cidr() {
     iface=$1
     ip -4 -o addr show dev "$iface" scope global 2>/dev/null |
         $BB awk '{ print $4 }' | $BB head -n 1
+}
+
+interface_has_ipv4_cidr() {
+    iface=$1
+    expected_cidr=$2
+
+    ip -4 -o addr show dev "$iface" scope global 2>/dev/null | $BB awk \
+        -v expected_cidr="$expected_cidr" '
+        $4 == expected_cidr { found = 1 }
+        END { exit(found ? 0 : 1) }
+    '
 }
 
 interface_default_gateway() {
@@ -206,7 +221,7 @@ enable_ipv4_forwarding() {
 
     ip_forward=$($BB cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)
     if [ "$ip_forward" != "1" ]; then
-        log_console "IPv4 forwarding is not enabled; VZNAT-to-RNDIS routing may fail"
+        log_console "IPv4 forwarding is not enabled; host-link-to-RNDIS routing may fail"
         return 1
     fi
 
@@ -250,7 +265,6 @@ has_ingress_policy_rule() {
 
 install_policy_route() {
     rndis_gateway=$1
-    ingress_source=$2
 
     if ! ip route replace "$rndis_gateway/32" dev "$RNDIS_IFACE" scope link table "$TABLE_ID" \
         2>/tmp/thrurndis-policy-link-route.err; then
@@ -262,31 +276,29 @@ install_policy_route() {
     if ! ip route replace default via "$rndis_gateway" dev "$RNDIS_IFACE" table "$TABLE_ID" \
         2>/tmp/thrurndis-policy-route.err; then
         output=$($BB cat /tmp/thrurndis-policy-route.err 2>/dev/null || true)
-        log_console "failed to install VZNAT ingress default route via $RNDIS_IFACE: ${output}"
+        log_console "failed to install host-link ingress default route via $RNDIS_IFACE: ${output}"
         return 1
     fi
 
     delete_policy_rule
-    if ip rule add priority "$RULE_PRIORITY" from "$ingress_source/32" \
+    if ip rule add priority "$RULE_PRIORITY" from "$HOST_LINK_HOST_CIDR" \
         iif "$INGRESS_IFACE" table "$TABLE_ID" \
         2>/tmp/thrurndis-policy-rule.err; then
         ip route flush cache 2>/dev/null || true
-        log_console "configured ingress policy route: from $ingress_source/32 iif $INGRESS_IFACE lookup $TABLE_ID via $rndis_gateway dev $RNDIS_IFACE"
+        log_console "configured ingress policy route: from $HOST_LINK_HOST_CIDR iif $INGRESS_IFACE lookup $TABLE_ID via $rndis_gateway dev $RNDIS_IFACE"
         return 0
     fi
 
     output=$($BB cat /tmp/thrurndis-policy-rule.err 2>/dev/null || true)
-    log_console "failed to install ingress policy rule for $ingress_source/32 on $INGRESS_IFACE: ${output}"
+    log_console "failed to install ingress policy rule for $HOST_LINK_HOST_CIDR on $INGRESS_IFACE: ${output}"
     return 1
 }
 
 install_nftables() {
-    ingress_source=$1
-    ingress_destination=$2
-    rndis_dns=$3
+    rndis_dns=$1
 
     if ! command -v nft >/dev/null 2>&1; then
-        log_console "nft not found; skipping VZNAT-to-RNDIS masquerade"
+        log_console "nft not found; skipping host-link-to-RNDIS masquerade"
         return 1
     fi
 
@@ -297,28 +309,28 @@ install_nftables() {
 table ip $NFT_TABLE {
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" ip daddr $ingress_destination udp dport 53 dnat to $rndis_dns
-        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" ip daddr $ingress_destination tcp dport 53 dnat to $rndis_dns
+        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 udp dport 53 dnat to $rndis_dns
+        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 tcp dport 53 dnat to $rndis_dns
     }
 
     chain forward {
         type filter hook forward priority 0; policy drop;
-        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" accept
-        iifname "$RNDIS_IFACE" oifname "$INGRESS_IFACE" ct state established,related accept
+        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" accept
+        ip daddr $HOST_LINK_HOST_CIDR iifname "$RNDIS_IFACE" oifname "$INGRESS_IFACE" ct state established,related accept
     }
 
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
-        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" masquerade
+        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" masquerade
     }
 }
 EOF_NFT
     then
-        log_console "configured nftables VZNAT-to-RNDIS masquerade and DNS proxy: $ingress_source/32 on $INGRESS_IFACE, $ingress_destination:53 -> $rndis_dns:53 on $RNDIS_IFACE"
+        log_console "configured nftables host-link-to-RNDIS masquerade and DNS proxy: $HOST_LINK_HOST_CIDR on $INGRESS_IFACE, $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53 on $RNDIS_IFACE"
         return 0
     fi
 
-    log_console "failed to configure nftables VZNAT-to-RNDIS masquerade"
+    log_console "failed to configure nftables host-link-to-RNDIS masquerade"
     return 1
 }
 
@@ -348,17 +360,8 @@ gateway_up() {
         return 1
     fi
 
-    ingress_cidr=$(interface_ipv4_cidr "$INGRESS_IFACE")
-    if [ -z "$ingress_cidr" ]; then
-        log_console "VZNAT interface $INGRESS_IFACE has no IPv4 CIDR"
-        clear_gateway_state
-        return 1
-    fi
-    ingress_destination=${ingress_cidr%%/*}
-
-    ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
-    if [ -z "$ingress_source" ]; then
-        log_console "VZNAT interface $INGRESS_IFACE has no default gateway; refusing an unscoped RNDIS route"
+    if ! interface_has_ipv4_cidr "$INGRESS_IFACE" "$HOST_LINK_GUEST_CIDR"; then
+        log_console "VZNAT interface $INGRESS_IFACE does not have host link $HOST_LINK_GUEST_CIDR"
         clear_gateway_state
         return 1
     fi
@@ -375,13 +378,13 @@ gateway_up() {
     fi
 
     if ! enable_ipv4_forwarding \
-        || ! install_policy_route "$rndis_gateway" "$ingress_source" \
-        || ! install_nftables "$ingress_source" "$ingress_destination" "$rndis_dns"; then
+        || ! install_policy_route "$rndis_gateway" \
+        || ! install_nftables "$rndis_dns"; then
         clear_gateway_state
         return 1
     fi
 
-    log_console "gateway ready: host $ingress_source/32 on $INGRESS_IFACE $ingress_cidr -> $RNDIS_IFACE via $rndis_gateway, DNS $ingress_destination:53 -> $rndis_dns:53"
+    log_console "gateway ready: host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
     announce_route_ready 1
     return 0
 }
@@ -389,23 +392,16 @@ gateway_up() {
 gateway_down() {
     clear_gateway_state
     : >"$RNDIS_RESOLV_CONF"
-    log_console "cleared VZNAT-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
+    log_console "cleared host-link-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
     announce_route_ready 0
     return 0
 }
 
 gateway_status() {
     missing=0
-    ingress_cidr=$(interface_ipv4_cidr "$INGRESS_IFACE")
-    ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
-    ingress_destination=${ingress_cidr%%/*}
 
-    if [ -z "$ingress_cidr" ]; then
-        echo "$INGRESS_IFACE has no IPv4 CIDR"
-        missing=1
-    fi
-    if [ -z "$ingress_source" ]; then
-        echo "$INGRESS_IFACE has no default gateway for the host source allowlist"
+    if ! interface_has_ipv4_cidr "$INGRESS_IFACE" "$HOST_LINK_GUEST_CIDR"; then
+        echo "$INGRESS_IFACE does not have host link $HOST_LINK_GUEST_CIDR"
         missing=1
     fi
 
@@ -441,8 +437,8 @@ gateway_status() {
         missing=1
     fi
 
-    if [ -n "$ingress_source" ] && ! has_ingress_policy_rule "$ingress_source"; then
-        echo "missing ingress policy rule for host $ingress_source/32 on $INGRESS_IFACE lookup $TABLE_ID"
+    if ! has_ingress_policy_rule "$HOST_LINK_HOST_IPV4"; then
+        echo "missing ingress policy rule for host $HOST_LINK_HOST_CIDR on $INGRESS_IFACE lookup $TABLE_ID"
         missing=1
     fi
 
@@ -458,43 +454,50 @@ gateway_status() {
     elif ! nft list table ip "$NFT_TABLE" >/dev/null 2>&1; then
         echo "missing nft table ip $NFT_TABLE"
         missing=1
-    elif [ -n "$ingress_source" ]; then
-        if [ -n "$ingress_destination" ] && [ -n "$rndis_dns" ]; then
+    else
+        if [ -n "$rndis_dns" ]; then
             if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
-                $BB grep -F "ip saddr $ingress_source" |
+                $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
                 $BB grep -F "iifname \"$INGRESS_IFACE\"" |
-                $BB grep -F "ip daddr $ingress_destination" |
+                $BB grep -F "ip daddr $HOST_LINK_GUEST_IPV4" |
                 $BB grep -F "udp dport 53" |
                 $BB grep -F "dnat to $rndis_dns" >/dev/null 2>&1; then
-                echo "missing UDP DNS proxy $ingress_destination:53 -> $rndis_dns:53"
+                echo "missing UDP DNS proxy $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
                 missing=1
             fi
             if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
-                $BB grep -F "ip saddr $ingress_source" |
+                $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
                 $BB grep -F "iifname \"$INGRESS_IFACE\"" |
-                $BB grep -F "ip daddr $ingress_destination" |
+                $BB grep -F "ip daddr $HOST_LINK_GUEST_IPV4" |
                 $BB grep -F "tcp dport 53" |
                 $BB grep -F "dnat to $rndis_dns" >/dev/null 2>&1; then
-                echo "missing TCP DNS proxy $ingress_destination:53 -> $rndis_dns:53"
+                echo "missing TCP DNS proxy $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
                 missing=1
             fi
         fi
         if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
-            $BB grep -F "ip saddr $ingress_source" |
+            $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
             $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
-            echo "missing nft forward allowlist for host $ingress_source/32"
+            echo "missing nft forward allowlist for host $HOST_LINK_HOST_CIDR"
+            missing=1
+        fi
+        if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
+            $BB grep -F "ip daddr $HOST_LINK_HOST_IPV4" |
+            $BB grep -F "iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\"" |
+            $BB grep -F "ct state established,related" >/dev/null 2>&1; then
+            echo "missing nft return allowlist for host $HOST_LINK_HOST_CIDR"
             missing=1
         fi
         if ! nft list chain ip "$NFT_TABLE" postrouting 2>/dev/null |
-            $BB grep -F "ip saddr $ingress_source" |
+            $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
             $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
-            echo "missing nft masquerade allowlist for host $ingress_source/32"
+            echo "missing nft masquerade allowlist for host $HOST_LINK_HOST_CIDR"
             missing=1
         fi
     fi
 
     if [ "$missing" -eq 0 ]; then
-        echo "ready host $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, ingress $ingress_cidr table $TABLE_ID, DNS $ingress_destination:53 -> $rndis_dns:53"
+        echo "ready host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway table $TABLE_ID, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
         return 0
     fi
 

@@ -26,28 +26,27 @@ Inside ThruRNDIS, the guest built here is the forwarding boundary for this IPv4
 data path:
 
 ```text
-macOS IPv4 `/1` routes
--> VZNAT guest eth0
+macOS `192.168.100.2/24` IPv4 `/1` routes
+-> feth and the VM-created VZNAT bridge
+-> guest eth0 `192.168.100.1/24`
 -> guest ingress policy routing and nftables masquerade
 -> USB RNDIS usb0
 ```
 
-The VZNAT guest address is discovered at every boot rather than fixed in the
-assets. After DHCP, the guest reports the live address to the host over the
-virtio console. Once `usb0` DHCP and DNS discovery, policy routing, forwarding,
-NAT, and the DNS DNAT proxy are all ready, it reports a separate readiness
-marker. The privileged helper may then install the two host IPv4 routes
-(`0.0.0.0/1` and `128.0.0.0/1`) using the guest address as their next hop.
+The VZNAT DHCP lease remains dynamic. After DHCP, the guest reports its live
+address, CIDR, and gateway to the host over the virtio console so the privileged
+helper can identify the VM-created bridge. The guest then adds the separate
+fixed host-link address `192.168.100.1/24` to `eth0`; the helper configures the
+host side as `192.168.100.2/24` and uses `192.168.100.1` as the next hop for the
+two IPv4 routes (`0.0.0.0/1` and `128.0.0.0/1`). The DHCP lease is bridge
+discovery metadata, not the data-plane next hop.
 
-The guest accepts this transit path only when the packet arrives on `eth0` with
-the source `/32` equal to `eth0`'s live default gateway, which is the macOS
-host-side VZNAT address. Other VZNAT peers are not granted the RNDIS egress.
-
-macOS points DNS at the guest VZNAT address. The guest captures IPv4 DNS
-servers from the live `usb0` DHCP lease and DNATs host UDP/TCP port 53 traffic
-from its `eth0` address to the first RNDIS DNS server. DNS therefore uses the
-same ingress allowlist, policy route, conntrack return path, and masquerade as
-other forwarded IPv4 traffic.
+The guest accepts this transit path only for source `192.168.100.2/32` arriving
+on `eth0`. Other VZNAT peers are not granted RNDIS egress. macOS points DNS at
+`192.168.100.1`; the guest captures IPv4 DNS servers from the live `usb0` DHCP
+lease and DNATs host UDP/TCP traffic addressed to `192.168.100.1:53` to the
+first RNDIS DNS server. DNS uses the same fixed source allowlist, policy route,
+conntrack return path, and masquerade as other forwarded IPv4 traffic.
 
 The machine-readable console contract is line-oriented:
 
@@ -60,8 +59,10 @@ THRURNDIS_RNDIS_ROUTE_READY=1
 
 `THRURNDIS_RNDIS_ROUTE_READY=0` is emitted before gateway state is rebuilt and
 when `usb0` disappears. The host must withdraw its `/1` routes on that marker,
-VM termination, or loss of the control channel. WireGuard, its userspace tools,
-kernel module, and the former configuration VirtioFS share are not included.
+VM termination, or loss of the control channel. It may install them through
+`192.168.100.1` only after the marker becomes `1`. WireGuard, its userspace
+tools, kernel module, and the former configuration VirtioFS share are not
+included.
 
 ### Initramfs boot responsibilities
 
@@ -73,9 +74,9 @@ the initramfs; the macOS app does not execute them on the host.
 | --- | --- | --- |
 | `::sysinit` | `rcS` | Mount early filesystems, create device and console state, initialize `mdev`, load console and kernel-command-line modules, and prepare the RAM-backed shell environment. |
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
-| `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP and report its runtime IPv4, CIDR, and gateway markers before the RNDIS watcher starts. |
+| `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
-| watcher helper | `eth0-usb0-gateway` | Clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only the live host-side VZNAT source `/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy guest-address UDP/TCP DNS to RNDIS DNS, maintain scoped nftables rules, and publish readiness changes. |
+| watcher helper | `eth0-usb0-gateway` | Clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, maintain scoped nftables rules, and publish readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 
 The split is intentional: boot-time RNDIS module preparation must not depend on

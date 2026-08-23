@@ -93,7 +93,7 @@ class ComplianceTests(unittest.TestCase):
         self.assertFalse((scripts / "init-virtiofs-wgconf").exists())
         self.assertFalse((scripts / "wg0-usb0-gateway").exists())
 
-    def test_guest_vznat_route_marker_contract(self) -> None:
+    def test_guest_vznat_and_fixed_host_link_contract(self) -> None:
         scripts = ROOT / "script/initramfs"
         init_network = (scripts / "init-network").read_text()
         gateway = (scripts / "eth0-usb0-gateway").read_text()
@@ -103,15 +103,32 @@ class ComplianceTests(unittest.TestCase):
             "THRURNDIS_VZNAT_GATEWAY=",
         ):
             self.assertIn(marker, init_network)
+        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", init_network)
+        self.assertIn(
+            'ip -4 address replace "$HOST_LINK_GUEST_CIDR" dev "$iface"',
+            init_network,
+        )
+
+        self.assertIn("HOST_LINK_GUEST_IPV4=192.168.100.1", gateway)
+        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", gateway)
+        self.assertIn("HOST_LINK_HOST_IPV4=192.168.100.2", gateway)
+        self.assertIn("HOST_LINK_HOST_CIDR=192.168.100.2/32", gateway)
         self.assertIn('THRURNDIS_RNDIS_ROUTE_READY=$1', gateway)
-        self.assertIn('from "$ingress_source/32"', gateway)
+        self.assertIn('from "$HOST_LINK_HOST_CIDR"', gateway)
         self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
-        self.assertIn('ip saddr $ingress_source/32', gateway)
+        self.assertIn('ip saddr $HOST_LINK_HOST_CIDR', gateway)
+        self.assertIn('ip daddr $HOST_LINK_HOST_CIDR', gateway)
+        self.assertIn('ip daddr $HOST_LINK_GUEST_IPV4', gateway)
         self.assertIn('iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE"', gateway)
         self.assertIn('udp dport 53 dnat to $rndis_dns', gateway)
         self.assertIn('tcp dport 53 dnat to $rndis_dns', gateway)
         self.assertIn('THRURNDIS_RNDIS_RESOLV_CONF', gateway)
         self.assertIn('$1 == "nameserver"', gateway)
+        self.assertNotIn(
+            'ingress_source=$(interface_default_gateway "$INGRESS_IFACE")',
+            gateway,
+        )
+        self.assertNotIn("ingress_destination=", gateway)
 
     def test_legacy_wireguard_payload_fails_closed(self) -> None:
         entry = CpioEntry(

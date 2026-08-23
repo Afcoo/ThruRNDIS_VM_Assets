@@ -25,19 +25,23 @@ extras.
   app uses `Image-lts` as the `VZLinuxBootLoader` kernel and
   `initramfs-thrurndis-lts` as the initial RAM disk. A user-managed scratch disk
   is optional and separate from the RAM-backed initramfs root.
-- The guest is the packet-forwarding boundary for `macOS /1 routes -> VZNAT ->
-  guest eth0 -> ingress policy routing and nftables masquerade -> USB RNDIS
-  usb0`. The app and privileged helper select the guest as the host-side next
-  hop but do not forward packet payloads themselves.
-- macOS uses the guest VZNAT address as its DNS server. DNS packets addressed
-  to guest `eth0:53` are DNATed for both UDP and TCP to the first usable IPv4
+- The guest is the packet-forwarding boundary for `macOS 192.168.100.2/24 /1
+  routes -> feth and the VM-created VZNAT bridge -> guest eth0
+  192.168.100.1/24 -> ingress policy routing and nftables masquerade -> USB
+  RNDIS usb0`. The app and privileged helper configure the host link and
+  routes but do not forward packet payloads themselves.
+- macOS uses fixed guest host-link address `192.168.100.1` as its DNS server.
+  DNS packets from fixed host source `192.168.100.2/32` addressed to
+  `192.168.100.1:53` are DNATed for both UDP and TCP to the first usable IPv4
   DNS server from the live `usb0` DHCP lease, then follow the same policy route
   and masquerade path as other host traffic.
-- The VZNAT subnet and guest address are runtime-assigned. Never embed a fixed
-  VZNAT address or subnet in `vm_assets.zip`, the source bundle, manifests,
-  examples, or build inputs. WireGuard and its former VirtioFS configuration
-  share are no longer part of the guest architecture; do not reintroduce keys,
-  configuration, tools, modules, or legacy init scripts.
+- The VZNAT DHCP subnet and guest lease are runtime-assigned and exist to let
+  the helper discover the VM-created bridge. Never embed a fixed VZNAT DHCP
+  address or subnet in `vm_assets.zip`, the source bundle, manifests, examples,
+  or build inputs. The separate fixed host-link subnet is `192.168.100.0/24`.
+  WireGuard and its former VirtioFS configuration share are no longer part of
+  the guest architecture; do not reintroduce keys, configuration, tools,
+  modules, or legacy init scripts.
 
 ### Guest init contract
 
@@ -51,20 +55,23 @@ they are not host-side setup scripts and are not run by the macOS app.
 - `init-rndis` (`::wait`) loads the XHCI, USB networking, and RNDIS host modules
   and rescans devices. Keep this boot-time preparation separate from the
   watcher so it does not depend on `usb0` already existing.
-- `init-network` (`::wait`) configures the VZNAT NIC `eth0` with DHCP and emits
-  the machine-readable `THRURNDIS_VZNAT_IPV4`, `THRURNDIS_VZNAT_CIDR`, and
-  `THRURNDIS_VZNAT_GATEWAY` console markers from the live lease. The host must
-  not install its `/1` routes until the gateway-ready marker is also `1`.
+- `init-network` (`::wait`) configures the VZNAT NIC `eth0` with DHCP, adds the
+  fixed secondary host-link address `192.168.100.1/24`, and emits the
+  machine-readable `THRURNDIS_VZNAT_IPV4`, `THRURNDIS_VZNAT_CIDR`, and
+  `THRURNDIS_VZNAT_GATEWAY` console markers from the live lease. Those markers
+  identify the VM-created bridge; they are not the data-plane address. The host
+  must not install its `/1` routes through `192.168.100.1` until the
+  gateway-ready marker is also `1`.
 - `usb0-watcher` (`::respawn`) watches the fixed RNDIS interface `usb0`, retries
   gateway setup when the interface appears or its state becomes incomplete,
   and clears stale gateway state when the interface disappears. It must remain
   tolerant of late USB attachment, detach, and reconnect.
 - `eth0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
-  obtains `usb0` DHCP and derives the host-side VZNAT address from `eth0`'s
-  live default gateway. Its policy route and nftables rules admit only that
-  source `/32` arriving on `eth0`, then forward it through the RNDIS gateway.
-  It enables IPv4 forwarding, owns the narrow `eth0`-to-`usb0` rules, and
-  installs the guest-address-to-RNDIS-DNS DNAT rules. It emits
+  obtains `usb0` DHCP. Its policy route and nftables rules admit only fixed host
+  source `192.168.100.2/32` arriving on `eth0`, then forward it through the
+  RNDIS gateway. It enables IPv4 forwarding, owns the narrow
+  `eth0`-to-`usb0` rules, and DNATs UDP/TCP DNS addressed to
+  `192.168.100.1:53` to RNDIS DNS. It emits
   `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
   emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
 - Before `usb0` DHCP, `eth0-usb0-gateway` clears `/etc/resolv.conf`; Alpine's

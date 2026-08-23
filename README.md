@@ -34,14 +34,20 @@ macOS IPv4 `/1` routes
 
 The VZNAT guest address is discovered at every boot rather than fixed in the
 assets. After DHCP, the guest reports the live address to the host over the
-virtio console. Once `usb0` DHCP, policy routing, forwarding, and NAT are all
-ready, it reports a separate readiness marker. The privileged helper may then
-install the two host IPv4 routes (`0.0.0.0/1` and `128.0.0.0/1`) using the
-guest address as their next hop.
+virtio console. Once `usb0` DHCP and DNS discovery, policy routing, forwarding,
+NAT, and the DNS DNAT proxy are all ready, it reports a separate readiness
+marker. The privileged helper may then install the two host IPv4 routes
+(`0.0.0.0/1` and `128.0.0.0/1`) using the guest address as their next hop.
 
 The guest accepts this transit path only when the packet arrives on `eth0` with
 the source `/32` equal to `eth0`'s live default gateway, which is the macOS
 host-side VZNAT address. Other VZNAT peers are not granted the RNDIS egress.
+
+macOS points DNS at the guest VZNAT address. The guest captures IPv4 DNS
+servers from the live `usb0` DHCP lease and DNATs host UDP/TCP port 53 traffic
+from its `eth0` address to the first RNDIS DNS server. DNS therefore uses the
+same ingress allowlist, policy route, conntrack return path, and masquerade as
+other forwarded IPv4 traffic.
 
 The machine-readable console contract is line-oriented:
 
@@ -69,7 +75,7 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP and report its runtime IPv4, CIDR, and gateway markers before the RNDIS watcher starts. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
-| watcher helper | `eth0-usb0-gateway` | Acquire `usb0` DHCP, route only the live host-side VZNAT source `/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, maintain scoped nftables rules, and publish readiness changes. |
+| watcher helper | `eth0-usb0-gateway` | Clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only the live host-side VZNAT source `/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy guest-address UDP/TCP DNS to RNDIS DNS, maintain scoped nftables rules, and publish readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 
 The split is intentional: boot-time RNDIS module preparation must not depend on

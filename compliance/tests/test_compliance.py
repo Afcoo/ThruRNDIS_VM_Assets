@@ -108,6 +108,10 @@ class ComplianceTests(unittest.TestCase):
         self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
         self.assertIn('ip saddr $ingress_source/32', gateway)
         self.assertIn('iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE"', gateway)
+        self.assertIn('udp dport 53 dnat to $rndis_dns', gateway)
+        self.assertIn('tcp dport 53 dnat to $rndis_dns', gateway)
+        self.assertIn('THRURNDIS_RNDIS_RESOLV_CONF', gateway)
+        self.assertIn('$1 == "nameserver"', gateway)
 
     def test_legacy_wireguard_payload_fails_closed(self) -> None:
         entry = CpioEntry(

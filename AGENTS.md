@@ -29,6 +29,10 @@ extras.
   guest eth0 -> ingress policy routing and nftables masquerade -> USB RNDIS
   usb0`. The app and privileged helper select the guest as the host-side next
   hop but do not forward packet payloads themselves.
+- macOS uses the guest VZNAT address as its DNS server. DNS packets addressed
+  to guest `eth0:53` are DNATed for both UDP and TCP to the first usable IPv4
+  DNS server from the live `usb0` DHCP lease, then follow the same policy route
+  and masquerade path as other host traffic.
 - The VZNAT subnet and guest address are runtime-assigned. Never embed a fixed
   VZNAT address or subnet in `vm_assets.zip`, the source bundle, manifests,
   examples, or build inputs. WireGuard and its former VirtioFS configuration
@@ -59,10 +63,14 @@ they are not host-side setup scripts and are not run by the macOS app.
   obtains `usb0` DHCP and derives the host-side VZNAT address from `eth0`'s
   live default gateway. Its policy route and nftables rules admit only that
   source `/32` arriving on `eth0`, then forward it through the RNDIS gateway.
-  It enables IPv4 forwarding and owns the narrow `eth0`-to-`usb0` rules. It
-  emits
+  It enables IPv4 forwarding, owns the narrow `eth0`-to-`usb0` rules, and
+  installs the guest-address-to-RNDIS-DNS DNAT rules. It emits
   `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
   emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
+- Before `usb0` DHCP, `eth0-usb0-gateway` clears `/etc/resolv.conf`; Alpine's
+  BusyBox DHCP script then atomically writes the live RNDIS DNS from option 6.
+  The gateway accepts only the first value routable as IPv4. Do not hard-code a
+  public resolver or treat the earlier VZNAT DHCP resolver as RNDIS upstream.
 - `init-console` (`hvc0::respawn`) attaches the interactive shell to the virtio
   console and restores it when the shell exits.
 

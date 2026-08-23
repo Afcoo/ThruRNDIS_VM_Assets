@@ -15,6 +15,7 @@ RNDIS_DHCP_ATTEMPTS=${THRURNDIS_RNDIS_DHCP_ATTEMPTS:-2}
 RNDIS_DHCP_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TIMEOUT_SECONDS:-2}
 RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS:-6}
 NFT_TABLE=${THRURNDIS_NFT_TABLE:-thrurndis}
+RNDIS_RESOLV_CONF=${THRURNDIS_RNDIS_RESOLV_CONF:-/etc/resolv.conf}
 
 log() {
     echo "thrurndis-gateway: $*" >/dev/kmsg 2>/dev/null || true
@@ -110,6 +111,14 @@ interface_default_gateway() {
     '
 }
 
+rndis_dns_server() {
+    [ -f "$RNDIS_RESOLV_CONF" ] || return 1
+    server=$($BB awk '$1 == "nameserver" { print $2; exit }' "$RNDIS_RESOLV_CONF")
+    [ -n "$server" ] || return 1
+    ip -4 route get "$server" >/dev/null 2>&1 || return 1
+    printf '%s' "$server"
+}
+
 configure_rndis_ipv4() {
     iface=$1
     udhcpc_log="/tmp/udhcpc-$iface.log"
@@ -122,6 +131,7 @@ configure_rndis_ipv4() {
 
     log_console "requesting IPv4 DHCP on RNDIS interface $iface"
     ip link set dev "$iface" up 2>/dev/null || $BB ifconfig "$iface" up 2>/dev/null || true
+    : >"$RNDIS_RESOLV_CONF"
 
     if [ -f /usr/share/udhcpc/default.script ]; then
         udhcpc_script="-s /usr/share/udhcpc/default.script"
@@ -133,12 +143,13 @@ configure_rndis_ipv4() {
     rc=$?
     if [ "$rc" -eq 0 ]; then
         ipv4=$(interface_ipv4_cidr "$iface")
-        if [ -n "$ipv4" ]; then
-            log_console "RNDIS interface $iface IPv4 $ipv4"
+        dns_server=$(rndis_dns_server || true)
+        if [ -n "$ipv4" ] && [ -n "$dns_server" ]; then
+            log_console "RNDIS interface $iface IPv4 $ipv4, DNS $dns_server"
             return 0
         fi
 
-        log_console "RNDIS interface $iface DHCP completed without visible IPv4 address"
+        log_console "RNDIS interface $iface DHCP completed without an IPv4 address and DNS server"
         return 1
     fi
 
@@ -165,13 +176,18 @@ ensure_rndis_gateway() {
 
     ipv4=$(interface_ipv4_cidr "$iface")
     gateway=$(interface_default_gateway "$iface")
-    if [ -z "$ipv4" ] || [ -z "$gateway" ]; then
+    dns_server=$(rndis_dns_server || true)
+    if [ -z "$ipv4" ] || [ -z "$gateway" ] || [ -z "$dns_server" ]; then
         configure_rndis_ipv4 "$iface" || return 1
     fi
 
     gateway=$(interface_default_gateway "$iface")
     if [ -z "$gateway" ]; then
         log_console "RNDIS interface $iface has no default gateway"
+        return 1
+    fi
+    if ! rndis_dns_server >/dev/null; then
+        log_console "RNDIS interface $iface has no DHCP DNS server"
         return 1
     fi
 
@@ -266,6 +282,8 @@ install_policy_route() {
 
 install_nftables() {
     ingress_source=$1
+    ingress_destination=$2
+    rndis_dns=$3
 
     if ! command -v nft >/dev/null 2>&1; then
         log_console "nft not found; skipping VZNAT-to-RNDIS masquerade"
@@ -277,6 +295,12 @@ install_nftables() {
     nft delete table ip "$NFT_TABLE" 2>/dev/null || true
     if nft -f - <<EOF_NFT
 table ip $NFT_TABLE {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" ip daddr $ingress_destination udp dport 53 dnat to $rndis_dns
+        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" ip daddr $ingress_destination tcp dport 53 dnat to $rndis_dns
+    }
+
     chain forward {
         type filter hook forward priority 0; policy drop;
         ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" accept
@@ -290,7 +314,7 @@ table ip $NFT_TABLE {
 }
 EOF_NFT
     then
-        log_console "configured nftables VZNAT-to-RNDIS masquerade: $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE"
+        log_console "configured nftables VZNAT-to-RNDIS masquerade and DNS proxy: $ingress_source/32 on $INGRESS_IFACE, $ingress_destination:53 -> $rndis_dns:53 on $RNDIS_IFACE"
         return 0
     fi
 
@@ -330,6 +354,7 @@ gateway_up() {
         clear_gateway_state
         return 1
     fi
+    ingress_destination=${ingress_cidr%%/*}
 
     ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
     if [ -z "$ingress_source" ]; then
@@ -342,21 +367,28 @@ gateway_up() {
         clear_gateway_state
         return 1
     }
-
-    if ! enable_ipv4_forwarding \
-        || ! install_policy_route "$rndis_gateway" "$ingress_source" \
-        || ! install_nftables "$ingress_source"; then
+    rndis_dns=$(rndis_dns_server || true)
+    if [ -z "$rndis_dns" ]; then
+        log_console "RNDIS DHCP did not provide an IPv4 DNS server"
         clear_gateway_state
         return 1
     fi
 
-    log_console "gateway ready: host $ingress_source/32 on $INGRESS_IFACE $ingress_cidr -> $RNDIS_IFACE via $rndis_gateway"
+    if ! enable_ipv4_forwarding \
+        || ! install_policy_route "$rndis_gateway" "$ingress_source" \
+        || ! install_nftables "$ingress_source" "$ingress_destination" "$rndis_dns"; then
+        clear_gateway_state
+        return 1
+    fi
+
+    log_console "gateway ready: host $ingress_source/32 on $INGRESS_IFACE $ingress_cidr -> $RNDIS_IFACE via $rndis_gateway, DNS $ingress_destination:53 -> $rndis_dns:53"
     announce_route_ready 1
     return 0
 }
 
 gateway_down() {
     clear_gateway_state
+    : >"$RNDIS_RESOLV_CONF"
     log_console "cleared VZNAT-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
     announce_route_ready 0
     return 0
@@ -366,6 +398,7 @@ gateway_status() {
     missing=0
     ingress_cidr=$(interface_ipv4_cidr "$INGRESS_IFACE")
     ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
+    ingress_destination=${ingress_cidr%%/*}
 
     if [ -z "$ingress_cidr" ]; then
         echo "$INGRESS_IFACE has no IPv4 CIDR"
@@ -383,12 +416,17 @@ gateway_status() {
 
     ipv4=$(interface_ipv4_cidr "$RNDIS_IFACE")
     rndis_gateway=$(interface_default_gateway "$RNDIS_IFACE")
+    rndis_dns=$(rndis_dns_server || true)
     if [ -z "$ipv4" ]; then
         echo "$RNDIS_IFACE has no IPv4 address"
         missing=1
     fi
     if [ -z "$rndis_gateway" ]; then
         echo "$RNDIS_IFACE has no default gateway"
+        missing=1
+    fi
+    if [ -z "$rndis_dns" ]; then
+        echo "$RNDIS_IFACE has no DHCP DNS server"
         missing=1
     fi
 
@@ -421,6 +459,26 @@ gateway_status() {
         echo "missing nft table ip $NFT_TABLE"
         missing=1
     elif [ -n "$ingress_source" ]; then
+        if [ -n "$ingress_destination" ] && [ -n "$rndis_dns" ]; then
+            if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
+                $BB grep -F "ip saddr $ingress_source" |
+                $BB grep -F "iifname \"$INGRESS_IFACE\"" |
+                $BB grep -F "ip daddr $ingress_destination" |
+                $BB grep -F "udp dport 53" |
+                $BB grep -F "dnat to $rndis_dns" >/dev/null 2>&1; then
+                echo "missing UDP DNS proxy $ingress_destination:53 -> $rndis_dns:53"
+                missing=1
+            fi
+            if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
+                $BB grep -F "ip saddr $ingress_source" |
+                $BB grep -F "iifname \"$INGRESS_IFACE\"" |
+                $BB grep -F "ip daddr $ingress_destination" |
+                $BB grep -F "tcp dport 53" |
+                $BB grep -F "dnat to $rndis_dns" >/dev/null 2>&1; then
+                echo "missing TCP DNS proxy $ingress_destination:53 -> $rndis_dns:53"
+                missing=1
+            fi
+        fi
         if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
             $BB grep -F "ip saddr $ingress_source" |
             $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
@@ -436,7 +494,7 @@ gateway_status() {
     fi
 
     if [ "$missing" -eq 0 ]; then
-        echo "ready host $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, ingress $ingress_cidr table $TABLE_ID"
+        echo "ready host $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, ingress $ingress_cidr table $TABLE_ID, DNS $ingress_destination:53 -> $rndis_dns:53"
         return 0
     fi
 

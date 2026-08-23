@@ -146,9 +146,12 @@ request instead of changing `main` directly.
 
 ## Verification and releases
 
-Pushes and pull requests run shell linting, REUSE checks, a clean full build,
-compliance validation, and a QEMU `aarch64` boot smoke test. The verification
-workflow deliberately uploads no binary artifact.
+Pushes, pull requests, and manual **Verify VM assets** runs perform shell
+linting, REUSE checks, a clean full build, compliance validation, and a QEMU
+`aarch64` boot smoke test. After every successful run, the workflow uploads a
+seven-day Actions artifact named `vm-assets-<commit-sha>` containing the same
+five-file set listed below. This temporary verification artifact is not a
+GitHub Release and is not selected by the app's latest-release installer.
 
 Releases are also manual. Run the **Release VM assets** workflow with a tag in
 the form `alpine-3.24.1-r1`. It creates a draft release, uploads and reads back

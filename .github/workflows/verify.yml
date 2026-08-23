@@ -107,5 +107,35 @@ jobs:
       - name: Confirm build did not change tracked inputs
         run: git diff --exit-code
 
-      # Intentionally no upload-artifact step: CI verifies but does not
-      # distribute binaries. Only the manual release workflow publishes them.
+      - name: Prepare downloadable verification artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir=build/verification-artifact
+          install -d "$artifact_dir"
+          install -m 0644 \
+            build/release/vm_assets.zip \
+            build/release/vm_assets-sources.tar.zst \
+            build/assets/compliance/sbom.spdx.json \
+            build/assets/compliance/THIRD_PARTY_NOTICES.md \
+            "$artifact_dir/"
+
+          (
+            cd "$artifact_dir"
+            sha256sum \
+              vm_assets.zip \
+              vm_assets-sources.tar.zst \
+              sbom.spdx.json \
+              THIRD_PARTY_NOTICES.md \
+              > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      - name: Upload verified VM assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vm-assets-${{ github.sha }}
+          path: build/verification-artifact/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

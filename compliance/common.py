@@ -541,7 +541,10 @@ def verify_file_map(entries: Sequence[CpioEntry], file_map: Mapping[str, Mapping
 
 def check_initramfs_content(entries: Sequence[CpioEntry]) -> None:
     forbidden_parts = {".PKGINFO", ".cache"}
-    forbidden_exact = {"wg0.conf"}
+    forbidden_exact = {
+        "wg0.conf", "wg", "wg-quick", "init-virtiofs-wgconf",
+        "wg0-usb0-gateway",
+    }
     for entry in entries:
         parts = PurePosixPath(entry.path).parts
         lower_name = PurePosixPath(entry.path).name.lower()
@@ -549,7 +552,11 @@ def check_initramfs_content(entries: Sequence[CpioEntry]) -> None:
             raise ComplianceError(f"staging metadata leaked into initramfs: {entry.path}")
         if parts[:2] == ("lib", "firmware") or parts[:3] == ("usr", "lib", "firmware"):
             raise ComplianceError(f"firmware is forbidden without explicit provenance: {entry.path}")
-        if lower_name in forbidden_exact or lower_name.endswith((".key", ".pem", ".p12", ".pfx")):
+        if (
+            lower_name in forbidden_exact
+            or lower_name.startswith("wireguard.ko")
+            or lower_name.endswith((".key", ".pem", ".p12", ".pfx"))
+        ):
             raise ComplianceError(f"secret or runtime configuration leaked into initramfs: {entry.path}")
 
 

@@ -24,7 +24,15 @@ sys.path.insert(0, str(COMPLIANCE_DIR))
 
 import build_compliance  # noqa: E402
 import verify_compliance  # noqa: E402
-from common import ComplianceError, load_policy, normalize_license, sha256_file, write_json  # noqa: E402
+from common import (  # noqa: E402
+    CpioEntry,
+    ComplianceError,
+    check_initramfs_content,
+    load_policy,
+    normalize_license,
+    sha256_file,
+    write_json,
+)
 from source_bundle import (  # noqa: E402
     ensure_commits,
     extract_licenses_from_tar,
@@ -70,6 +78,45 @@ class ComplianceTests(unittest.TestCase):
         policy = load_policy(self.policy_path)
         for package in lock["packages"]:
             normalize_license(package["license"], policy)
+
+    def test_current_inputs_exclude_legacy_wireguard_payloads(self) -> None:
+        lock = json.loads((ROOT / "config/packages.lock.json").read_text())
+        names = {package["name"] for package in lock["packages"]}
+        self.assertFalse(any(name.startswith("wireguard") for name in names))
+        self.assertNotIn("wireguard-tools-wg-quick", lock["rootPackages"])
+
+        alpine_env = (ROOT / "config/alpine.env").read_text().lower()
+        self.assertNotIn("wireguard", alpine_env)
+        self.assertNotIn("virtiofs", alpine_env)
+
+        scripts = ROOT / "script/initramfs"
+        self.assertFalse((scripts / "init-virtiofs-wgconf").exists())
+        self.assertFalse((scripts / "wg0-usb0-gateway").exists())
+
+    def test_guest_vznat_route_marker_contract(self) -> None:
+        scripts = ROOT / "script/initramfs"
+        init_network = (scripts / "init-network").read_text()
+        gateway = (scripts / "eth0-usb0-gateway").read_text()
+        for marker in (
+            "THRURNDIS_VZNAT_IPV4=",
+            "THRURNDIS_VZNAT_CIDR=",
+            "THRURNDIS_VZNAT_GATEWAY=",
+        ):
+            self.assertIn(marker, init_network)
+        self.assertIn('THRURNDIS_RNDIS_ROUTE_READY=$1', gateway)
+        self.assertIn('from "$ingress_source/32"', gateway)
+        self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
+        self.assertIn('ip saddr $ingress_source/32', gateway)
+        self.assertIn('iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE"', gateway)
+
+    def test_legacy_wireguard_payload_fails_closed(self) -> None:
+        entry = CpioEntry(
+            "lib/modules/6.0-0-lts/kernel/drivers/net/wireguard/wireguard.ko.gz",
+            stat.S_IFREG | 0o644,
+            b"legacy module",
+        )
+        with self.assertRaisesRegex(ComplianceError, "runtime configuration leaked"):
+            check_initramfs_content([entry])
 
     def test_unknown_license_fails_closed(self) -> None:
         with self.assertRaisesRegex(ComplianceError, "unreviewed SPDX license"):
@@ -214,7 +261,7 @@ class ComplianceTests(unittest.TestCase):
                 )
             )
 
-            module_path = "lib/modules/6.0-0-lts/kernel/wireguard.ko.gz"
+            module_path = "lib/modules/6.0-0-lts/kernel/drivers/net/usb/rndis_host.ko.gz"
             init_files = {
                 "bin/busybox": (stat.S_IFREG | 0o755, b"busybox"),
                 "etc/init.d/rcS": (stat.S_IFREG | 0o755, b"#!/bin/sh\n"),

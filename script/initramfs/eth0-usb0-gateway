@@ -1,0 +1,460 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+BB=/usr/bin/busybox
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+export PATH
+
+INGRESS_IFACE=${THRURNDIS_VZNAT_IFACE:-eth0}
+RNDIS_IFACE=${THRURNDIS_RNDIS_IFACE:-usb0}
+TABLE_ID=${THRURNDIS_RNDIS_ROUTE_TABLE:-100}
+RULE_PRIORITY=${THRURNDIS_RNDIS_ROUTE_PRIORITY:-1000}
+RNDIS_WAIT_SECONDS=${THRURNDIS_RNDIS_WAIT_SECONDS:-2}
+RNDIS_DHCP_ATTEMPTS=${THRURNDIS_RNDIS_DHCP_ATTEMPTS:-2}
+RNDIS_DHCP_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TIMEOUT_SECONDS:-2}
+RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS:-6}
+NFT_TABLE=${THRURNDIS_NFT_TABLE:-thrurndis}
+
+log() {
+    echo "thrurndis-gateway: $*" >/dev/kmsg 2>/dev/null || true
+}
+
+log_console() {
+    log "$*"
+    if [ -c /dev/console ]; then
+        echo "thrurndis-gateway: $*" >/dev/console 2>/dev/null || true
+    else
+        echo "thrurndis-gateway: $*" >&2
+    fi
+}
+
+announce_route_ready() {
+    log_console "THRURNDIS_RNDIS_ROUTE_READY=$1"
+}
+
+run_with_timeout() {
+    timeout_seconds=$1
+    shift
+
+    "$@" &
+    child_pid=$!
+    (
+        $BB sleep "$timeout_seconds"
+        kill "$child_pid" 2>/dev/null || true
+        $BB sleep 1
+        kill -9 "$child_pid" 2>/dev/null || true
+    ) &
+    watchdog_pid=$!
+
+    wait "$child_pid"
+    rc=$?
+    kill "$watchdog_pid" 2>/dev/null || true
+    wait "$watchdog_pid" 2>/dev/null || true
+
+    case "$rc" in
+        137|143) return 124 ;;
+        *) return "$rc" ;;
+    esac
+}
+
+load_module() {
+    module=$1
+    timeout_seconds=${2:-4}
+    [ -n "$module" ] || return 0
+
+    run_with_timeout "$timeout_seconds" /sbin/modprobe -q "$module" 2>/tmp/modprobe.err
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        log_console "loaded module $module"
+        return 0
+    fi
+
+    error=$($BB cat /tmp/modprobe.err 2>/dev/null || true)
+    log_console "failed to load module $module rc=$rc ${error}"
+    return "$rc"
+}
+
+wait_for_interface() {
+    iface=$1
+    timeout_seconds=${2:-2}
+    elapsed=0
+
+    while [ "$elapsed" -lt "$timeout_seconds" ]; do
+        [ -e "/sys/class/net/$iface" ] && return 0
+        [ -x /sbin/mdev ] && /sbin/mdev -s 2>/dev/null || true
+        $BB sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    return 1
+}
+
+interface_ipv4_cidr() {
+    iface=$1
+    ip -4 -o addr show dev "$iface" scope global 2>/dev/null |
+        $BB awk '{ print $4 }' | $BB head -n 1
+}
+
+interface_default_gateway() {
+    iface=$1
+    ip -4 route show default dev "$iface" 2>/dev/null | $BB awk '
+        $1 == "default" {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "via" && i < NF) {
+                    print $(i + 1)
+                    exit
+                }
+            }
+        }
+    '
+}
+
+configure_rndis_ipv4() {
+    iface=$1
+    udhcpc_log="/tmp/udhcpc-$iface.log"
+    udhcpc_script=""
+
+    if ! wait_for_interface "$iface" "$RNDIS_WAIT_SECONDS"; then
+        log_console "$iface not found; skipping IPv4 DHCP"
+        return 1
+    fi
+
+    log_console "requesting IPv4 DHCP on RNDIS interface $iface"
+    ip link set dev "$iface" up 2>/dev/null || $BB ifconfig "$iface" up 2>/dev/null || true
+
+    if [ -f /usr/share/udhcpc/default.script ]; then
+        udhcpc_script="-s /usr/share/udhcpc/default.script"
+    fi
+
+    run_with_timeout "$RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS" \
+        udhcpc -i "$iface" -q -n -t "$RNDIS_DHCP_ATTEMPTS" \
+        -T "$RNDIS_DHCP_TIMEOUT_SECONDS" $udhcpc_script >"$udhcpc_log" 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+        ipv4=$(interface_ipv4_cidr "$iface")
+        if [ -n "$ipv4" ]; then
+            log_console "RNDIS interface $iface IPv4 $ipv4"
+            return 0
+        fi
+
+        log_console "RNDIS interface $iface DHCP completed without visible IPv4 address"
+        return 1
+    fi
+
+    output=$($BB tail -n 3 "$udhcpc_log" 2>/dev/null | $BB tr '\n' ' ' || true)
+    log_console "RNDIS interface $iface DHCP failed rc=$rc ${output}"
+    return 1
+}
+
+load_netfilter_modules() {
+    for module in nfnetlink nf_tables nf_conntrack nf_nat nft_chain_nat nft_ct nft_nat nft_masq; do
+        load_module "$module" 2 || true
+    done
+}
+
+ensure_rndis_gateway() {
+    iface=${1:-$RNDIS_IFACE}
+
+    if ! wait_for_interface "$iface" "$RNDIS_WAIT_SECONDS"; then
+        log_console "RNDIS interface $iface is not present"
+        return 1
+    fi
+
+    ip link set dev "$iface" up 2>/dev/null || $BB ifconfig "$iface" up 2>/dev/null || true
+
+    ipv4=$(interface_ipv4_cidr "$iface")
+    gateway=$(interface_default_gateway "$iface")
+    if [ -z "$ipv4" ] || [ -z "$gateway" ]; then
+        configure_rndis_ipv4 "$iface" || return 1
+    fi
+
+    gateway=$(interface_default_gateway "$iface")
+    if [ -z "$gateway" ]; then
+        log_console "RNDIS interface $iface has no default gateway"
+        return 1
+    fi
+
+    printf '%s' "$gateway"
+    return 0
+}
+
+enable_ipv4_forwarding() {
+    if [ -w /proc/sys/net/ipv4/ip_forward ]; then
+        echo 1 >/proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+    fi
+    for filter in all "$INGRESS_IFACE" "$RNDIS_IFACE"; do
+        path="/proc/sys/net/ipv4/conf/$filter/rp_filter"
+        [ -w "$path" ] && echo 0 >"$path" 2>/dev/null || true
+    done
+
+    ip_forward=$($BB cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)
+    if [ "$ip_forward" != "1" ]; then
+        log_console "IPv4 forwarding is not enabled; VZNAT-to-RNDIS routing may fail"
+        return 1
+    fi
+
+    return 0
+}
+
+delete_policy_rule() {
+    while ip rule delete priority "$RULE_PRIORITY" table "$TABLE_ID" 2>/dev/null; do
+        :
+    done
+}
+
+has_ingress_policy_rule() {
+    expected_source=$1
+    ip rule show 2>/dev/null | $BB awk \
+        -v expected_source="$expected_source" \
+        -v expected_interface="$INGRESS_IFACE" \
+        -v expected_table="$TABLE_ID" '
+        {
+            source_matches = 0
+            interface_matches = 0
+            table_matches = 0
+            for (i = 1; i <= NF; i++) {
+                if ($i == "from" && i < NF) {
+                    source = $(i + 1)
+                    sub(/\/32$/, "", source)
+                    source_matches = source == expected_source
+                } else if ($i == "iif" && i < NF) {
+                    interface_matches = $(i + 1) == expected_interface
+                } else if ($i == "lookup" && i < NF) {
+                    table_matches = $(i + 1) == expected_table
+                }
+            }
+            if (source_matches && interface_matches && table_matches) {
+                found = 1
+            }
+        }
+        END { exit(found ? 0 : 1) }
+    '
+}
+
+install_policy_route() {
+    rndis_gateway=$1
+    ingress_source=$2
+
+    if ! ip route replace "$rndis_gateway/32" dev "$RNDIS_IFACE" scope link table "$TABLE_ID" \
+        2>/tmp/thrurndis-policy-link-route.err; then
+        output=$($BB cat /tmp/thrurndis-policy-link-route.err 2>/dev/null || true)
+        log_console "failed to install RNDIS gateway link route for $rndis_gateway: ${output}"
+        return 1
+    fi
+
+    if ! ip route replace default via "$rndis_gateway" dev "$RNDIS_IFACE" table "$TABLE_ID" \
+        2>/tmp/thrurndis-policy-route.err; then
+        output=$($BB cat /tmp/thrurndis-policy-route.err 2>/dev/null || true)
+        log_console "failed to install VZNAT ingress default route via $RNDIS_IFACE: ${output}"
+        return 1
+    fi
+
+    delete_policy_rule
+    if ip rule add priority "$RULE_PRIORITY" from "$ingress_source/32" \
+        iif "$INGRESS_IFACE" table "$TABLE_ID" \
+        2>/tmp/thrurndis-policy-rule.err; then
+        ip route flush cache 2>/dev/null || true
+        log_console "configured ingress policy route: from $ingress_source/32 iif $INGRESS_IFACE lookup $TABLE_ID via $rndis_gateway dev $RNDIS_IFACE"
+        return 0
+    fi
+
+    output=$($BB cat /tmp/thrurndis-policy-rule.err 2>/dev/null || true)
+    log_console "failed to install ingress policy rule for $ingress_source/32 on $INGRESS_IFACE: ${output}"
+    return 1
+}
+
+install_nftables() {
+    ingress_source=$1
+
+    if ! command -v nft >/dev/null 2>&1; then
+        log_console "nft not found; skipping VZNAT-to-RNDIS masquerade"
+        return 1
+    fi
+
+    load_netfilter_modules
+
+    nft delete table ip "$NFT_TABLE" 2>/dev/null || true
+    if nft -f - <<EOF_NFT
+table ip $NFT_TABLE {
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" accept
+        iifname "$RNDIS_IFACE" oifname "$INGRESS_IFACE" ct state established,related accept
+    }
+
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        ip saddr $ingress_source/32 iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE" masquerade
+    }
+}
+EOF_NFT
+    then
+        log_console "configured nftables VZNAT-to-RNDIS masquerade: $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE"
+        return 0
+    fi
+
+    log_console "failed to configure nftables VZNAT-to-RNDIS masquerade"
+    return 1
+}
+
+clear_gateway_state() {
+    delete_policy_rule
+    ip route flush table "$TABLE_ID" 2>/dev/null || true
+    ip route flush cache 2>/dev/null || true
+
+    if [ -w /proc/sys/net/ipv4/ip_forward ]; then
+        echo 0 >/proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+    fi
+
+    if command -v nft >/dev/null 2>&1; then
+        nft delete table ip "$NFT_TABLE" 2>/dev/null || true
+    fi
+}
+
+gateway_up() {
+    # Withdraw host /1 routes while state is being rebuilt. A later =1 marker
+    # is emitted only after the policy route, forwarding, and NAT all succeed.
+    announce_route_ready 0
+    clear_gateway_state
+
+    if ! wait_for_interface "$INGRESS_IFACE" 1; then
+        log_console "VZNAT interface $INGRESS_IFACE not found"
+        clear_gateway_state
+        return 1
+    fi
+
+    ingress_cidr=$(interface_ipv4_cidr "$INGRESS_IFACE")
+    if [ -z "$ingress_cidr" ]; then
+        log_console "VZNAT interface $INGRESS_IFACE has no IPv4 CIDR"
+        clear_gateway_state
+        return 1
+    fi
+
+    ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
+    if [ -z "$ingress_source" ]; then
+        log_console "VZNAT interface $INGRESS_IFACE has no default gateway; refusing an unscoped RNDIS route"
+        clear_gateway_state
+        return 1
+    fi
+
+    rndis_gateway=$(ensure_rndis_gateway "$RNDIS_IFACE") || {
+        clear_gateway_state
+        return 1
+    }
+
+    if ! enable_ipv4_forwarding \
+        || ! install_policy_route "$rndis_gateway" "$ingress_source" \
+        || ! install_nftables "$ingress_source"; then
+        clear_gateway_state
+        return 1
+    fi
+
+    log_console "gateway ready: host $ingress_source/32 on $INGRESS_IFACE $ingress_cidr -> $RNDIS_IFACE via $rndis_gateway"
+    announce_route_ready 1
+    return 0
+}
+
+gateway_down() {
+    clear_gateway_state
+    log_console "cleared VZNAT-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
+    announce_route_ready 0
+    return 0
+}
+
+gateway_status() {
+    missing=0
+    ingress_cidr=$(interface_ipv4_cidr "$INGRESS_IFACE")
+    ingress_source=$(interface_default_gateway "$INGRESS_IFACE")
+
+    if [ -z "$ingress_cidr" ]; then
+        echo "$INGRESS_IFACE has no IPv4 CIDR"
+        missing=1
+    fi
+    if [ -z "$ingress_source" ]; then
+        echo "$INGRESS_IFACE has no default gateway for the host source allowlist"
+        missing=1
+    fi
+
+    if [ ! -e "/sys/class/net/$RNDIS_IFACE" ]; then
+        echo "missing $RNDIS_IFACE"
+        return 1
+    fi
+
+    ipv4=$(interface_ipv4_cidr "$RNDIS_IFACE")
+    rndis_gateway=$(interface_default_gateway "$RNDIS_IFACE")
+    if [ -z "$ipv4" ]; then
+        echo "$RNDIS_IFACE has no IPv4 address"
+        missing=1
+    fi
+    if [ -z "$rndis_gateway" ]; then
+        echo "$RNDIS_IFACE has no default gateway"
+        missing=1
+    fi
+
+    if ! ip route show table "$TABLE_ID" default 2>/dev/null |
+        $BB grep -F "dev $RNDIS_IFACE" >/dev/null 2>&1; then
+        echo "missing policy route table $TABLE_ID default via $RNDIS_IFACE"
+        missing=1
+    fi
+    if [ -n "$rndis_gateway" ] && ! ip route show table "$TABLE_ID" "$rndis_gateway/32" 2>/dev/null |
+        $BB grep -F "dev $RNDIS_IFACE" >/dev/null 2>&1; then
+        echo "missing policy link route to RNDIS gateway $rndis_gateway"
+        missing=1
+    fi
+
+    if [ -n "$ingress_source" ] && ! has_ingress_policy_rule "$ingress_source"; then
+        echo "missing ingress policy rule for host $ingress_source/32 on $INGRESS_IFACE lookup $TABLE_ID"
+        missing=1
+    fi
+
+    ip_forward=$($BB cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)
+    if [ "$ip_forward" != "1" ]; then
+        echo "IPv4 forwarding is disabled"
+        missing=1
+    fi
+
+    if ! command -v nft >/dev/null 2>&1; then
+        echo "nft not found"
+        missing=1
+    elif ! nft list table ip "$NFT_TABLE" >/dev/null 2>&1; then
+        echo "missing nft table ip $NFT_TABLE"
+        missing=1
+    elif [ -n "$ingress_source" ]; then
+        if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
+            $BB grep -F "ip saddr $ingress_source" |
+            $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
+            echo "missing nft forward allowlist for host $ingress_source/32"
+            missing=1
+        fi
+        if ! nft list chain ip "$NFT_TABLE" postrouting 2>/dev/null |
+            $BB grep -F "ip saddr $ingress_source" |
+            $BB grep -F "iifname \"$INGRESS_IFACE\" oifname \"$RNDIS_IFACE\"" >/dev/null 2>&1; then
+            echo "missing nft masquerade allowlist for host $ingress_source/32"
+            missing=1
+        fi
+    fi
+
+    if [ "$missing" -eq 0 ]; then
+        echo "ready host $ingress_source/32 on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, ingress $ingress_cidr table $TABLE_ID"
+        return 0
+    fi
+
+    return 1
+}
+
+case "${1:-up}" in
+    up)
+        gateway_up
+        ;;
+    down)
+        gateway_down
+        ;;
+    status)
+        gateway_status
+        ;;
+    *)
+        echo "usage: $0 {up|down|status}" >&2
+        exit 2
+        ;;
+esac

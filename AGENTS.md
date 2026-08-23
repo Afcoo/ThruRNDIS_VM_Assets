@@ -25,14 +25,15 @@ extras.
   app uses `Image-lts` as the `VZLinuxBootLoader` kernel and
   `initramfs-thrurndis-lts` as the initial RAM disk. A user-managed scratch disk
   is optional and separate from the RAM-backed initramfs root.
-- The guest is the packet-forwarding boundary for `macOS WireGuard client ->
-  VZNAT guest endpoint -> guest wg0 -> policy routing and nftables masquerade ->
-  USB RNDIS usb0`. The app does not forward packet payloads itself.
-- WireGuard keys and configuration belong to the macOS app, not to this asset
-  repository. The app exposes only its generated `Shared/wg0.conf` directory
-  through the read-only `thrurndis-wireguard` VirtioFS share. Never add private
-  keys, WireGuard configuration, fixed WireGuard ports, or fixed overlay CIDRs
-  to `vm_assets.zip`, the source bundle, manifests, examples, or build inputs.
+- The guest is the packet-forwarding boundary for `macOS /1 routes -> VZNAT ->
+  guest eth0 -> ingress policy routing and nftables masquerade -> USB RNDIS
+  usb0`. The app and privileged helper select the guest as the host-side next
+  hop but do not forward packet payloads themselves.
+- The VZNAT subnet and guest address are runtime-assigned. Never embed a fixed
+  VZNAT address or subnet in `vm_assets.zip`, the source bundle, manifests,
+  examples, or build inputs. WireGuard and its former VirtioFS configuration
+  share are no longer part of the guest architecture; do not reintroduce keys,
+  configuration, tools, modules, or legacy init scripts.
 
 ### Guest init contract
 
@@ -46,29 +47,30 @@ they are not host-side setup scripts and are not run by the macOS app.
 - `init-rndis` (`::wait`) loads the XHCI, USB networking, and RNDIS host modules
   and rescans devices. Keep this boot-time preparation separate from the
   watcher so it does not depend on `usb0` already existing.
-- `init-virtiofs-wgconf` (`::wait`) loads `virtiofs`, mounts the
-  `thrurndis-wireguard` share read-only at `/run/thrurndis-wireguard`, and
-  requires a nonempty `wg0.conf` before the network one-shot starts.
-- `init-network` (`::once`) configures the VZNAT NIC `eth0` with DHCP, reads the
-  runtime `ListenPort`, emits
-  `THRURNDIS_WG_ENDPOINT=<guest-nat-ip>:<listen-port>`, and starts `wg0` from
-  `/run/thrurndis-wireguard/wg0.conf`.
+- `init-network` (`::wait`) configures the VZNAT NIC `eth0` with DHCP and emits
+  the machine-readable `THRURNDIS_VZNAT_IPV4`, `THRURNDIS_VZNAT_CIDR`, and
+  `THRURNDIS_VZNAT_GATEWAY` console markers from the live lease. The host must
+  not install its `/1` routes until the gateway-ready marker is also `1`.
 - `usb0-watcher` (`::respawn`) watches the fixed RNDIS interface `usb0`, retries
   gateway setup when the interface appears or its state becomes incomplete,
   and clears stale gateway state when the interface disappears. It must remain
   tolerant of late USB attachment, detach, and reconnect.
-- `wg0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
-  obtains `usb0` DHCP, derives the policy source from the live `wg0` connected
-  IPv4 CIDR, installs source policy routing through the RNDIS gateway, enables
-  IPv4 forwarding, and owns the narrow `wg0`-to-`usb0` nftables forwarding and
-  masquerade rules.
+- `eth0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
+  obtains `usb0` DHCP and derives the host-side VZNAT address from `eth0`'s
+  live default gateway. Its policy route and nftables rules admit only that
+  source `/32` arriving on `eth0`, then forward it through the RNDIS gateway.
+  It enables IPv4 forwarding and owns the narrow `eth0`-to-`usb0` rules. It
+  emits
+  `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
+  emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
 - `init-console` (`hvc0::respawn`) attaches the interactive shell to the virtio
   console and restores it when the shell exits.
 
 Keep the inittab wiring and these responsibility boundaries synchronized with
 the scripts. In particular, do not fold RNDIS module preparation into the
-runtime watcher, do not make the one-shot wait for `usb0`, and do not embed the
-app-owned WireGuard configuration into the initramfs.
+runtime watcher and do not make the VZNAT one-shot wait for `usb0`. Keep the
+one-shot ahead of the watcher so `eth0` DHCP completes before `usb0` DHCP can
+alter the guest's main routing table.
 
 ## Build and Provenance Rules
 
@@ -217,7 +219,8 @@ app-owned WireGuard configuration into the initramfs.
 - Run the full clean Linux build and compliance verifier.
 - Confirm that every APKBUILD source checksum and every downloaded artifact
   checksum matches the recorded value.
-- Inspect the final initramfs for staging files, private keys, WireGuard
-  configuration, package metadata, untracked binaries, and firmware.
+- Inspect the final initramfs for staging files, private keys, legacy WireGuard
+  or VirtioFS configuration artifacts, package metadata, untracked binaries,
+  and firmware.
 - Confirm that the SPDX SBOM, notices, package lock, file provenance map, and
   both release archives agree before publishing.

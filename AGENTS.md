@@ -142,6 +142,13 @@ alter the guest's main routing table.
   `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.
 - Create Releases as drafts. Publish only after the binary, corresponding
   source, notices, SBOM, and checksums have all passed readback verification.
+- Versioned Release tags use
+  `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`, where both versions
+  match the checked-in configuration. Legacy `alpine-*` tags are a separate
+  namespace and never contribute to the versioned revision number.
+- Publish versioned artifacts as formal, non-prerelease Releases with
+  `--latest=false`. Keep the legacy `alpine-3.24.1-r2` Release as GitHub Latest
+  for ThruRNDIS v0.3.0 clients that still request `/releases/latest`.
 - GitHub's automatically generated repository source archive is not a
   substitute for the third-party corresponding-source bundle.
 - Do not delete or replace a source bundle while its matching binary Release
@@ -201,20 +208,26 @@ alter the guest's main routing table.
 
 ### Select and publish the tag
 
-1. Re-read `ALPINE_VERSION` from `config/alpine.env` at the verified merged
-   commit and require `major.minor.patch` format. Immediately before release
-   dispatch, confirm the default branch still points to that same verified
-   commit; if it moved, stop and verify the new commit before recalculating.
+1. Re-read `assetVersion` from `config/vm-assets.json` and `ALPINE_VERSION` from
+   `config/alpine.env` at the verified merged commit. Require a positive integer
+   asset version and `major.minor.patch` Alpine version. Immediately before
+   release dispatch, confirm the default branch still points to that same
+   verified commit; if it moved, stop and verify the new commit before
+   recalculating.
 2. List all GitHub Releases, including drafts, and repository tags matching
-   `alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate revision numbers, a tag
-   without its corresponding Release, a Release without its tag, or any
-   malformed matching name.
+   `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate
+   revision numbers, a tag without its corresponding Release, a Release without
+   its tag, or any malformed matching name. Separately require
+   `/releases/latest` to resolve to the published, non-prerelease legacy
+   `alpine-3.24.1-r2` Release.
 3. Choose the next tag deterministically:
-   - If no Release exists for the merged `ALPINE_VERSION`, use
-     `alpine-<ALPINE_VERSION>-r1`, even when older Alpine versions have
-     Releases.
+   - If no Release exists for this asset-version namespace and the merged
+     `ALPINE_VERSION`, use
+     `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r1`, even when legacy
+     tags or older Alpine versions have Releases.
    - If Releases already exist for the same Alpine version, use one greater
-     than the largest existing revision: `max(r<N>) + 1`.
+     than the largest revision in the same asset-version namespace:
+     `max(r<N>) + 1`.
    - Exception for retrying this runbook: if its failed release attempt left a
      draft at the intended next tag and that draft targets the same verified
      commit, reuse that tag. Do not increment merely because the failed draft
@@ -231,6 +244,8 @@ alter the guest's main routing table.
 6. Independently read the final Release and require all of the following:
    - `targetCommitish` is the verified merged default-branch commit.
    - `isDraft` is `false`.
+   - `isPrerelease` is `false`, and the Release is not GitHub Latest.
+   - `/releases/latest` still resolves to `alpine-3.24.1-r2`.
    - The asset allowlist contains exactly five non-empty files and no others:
      `vm_assets.zip`, `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
      `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.

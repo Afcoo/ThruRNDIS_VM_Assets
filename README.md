@@ -179,7 +179,8 @@ changes such as required file/layout changes or breaking host/guest boot and
 control-contract changes. Alpine or APK refreshes, rebuilds, and additive
 backward-compatible metadata do not increment it. Consumers must treat a
 missing value as an unversioned legacy asset and accept only format versions
-they explicitly support.
+they explicitly support. Versioned Release tags use the matching
+`vm-assets-v<assetVersion>-` namespace.
 
 The build is intentionally lock-driven. It does not silently select newer
 packages. To propose an Alpine or APK refresh, run the **Update dependencies**
@@ -196,18 +197,26 @@ artifacts from the same verified commit. It uploads `vm_assets.zip` only after
 the four companion artifacts succeed, so selecting the binary does not require
 downloading the much larger corresponding-source archive. This temporary
 verification artifact set is not a GitHub Release and is not selected by the
-app's latest-release installer.
+app's versioned Release-list installer.
 
 Releases are also manual. Run the **Release VM assets** workflow with a tag in
-the form `alpine-3.24.1-r1`. It creates a draft release, uploads and reads back
-all five required assets, verifies their checksums, and publishes only after
-every check passes:
+the form `vm-assets-v1-alpine-3.24.1-r1`. The workflow requires the tag's VM
+asset version and Alpine version to match the checked-in configuration. It
+creates a draft release, uploads and reads back all five required assets,
+verifies their checksums, and publishes a formal, non-prerelease Release only
+after every check passes:
 
 - `vm_assets.zip`
 - `vm_assets-sources.tar.zst`
 - `sbom.spdx.json`
 - `THIRD_PARTY_NOTICES.md`
 - `SHA256SUMS`
+
+Versioned VM asset Releases are published with `--latest=false`. The legacy
+`alpine-3.24.1-r2` Release remains GitHub Latest so ThruRNDIS v0.3.0 continues
+to resolve its unversioned assets through `/releases/latest`. New app versions
+list Releases and select only tags in their supported namespace, beginning
+with `vm-assets-v1-*`.
 
 GitHub's automatically generated repository archive is not corresponding
 source for the third-party binaries. Keep the source bundle and notices

@@ -64,12 +64,17 @@ The machine-readable console contract is line-oriented:
 THRURNDIS_VZNAT_IPV4=<guest-ipv4>
 THRURNDIS_VZNAT_CIDR=<guest-ipv4/prefix>
 THRURNDIS_VZNAT_GATEWAY=<vznat-gateway-ipv4>
+THRURNDIS_RNDIS_IPV4=<canonical-rndis-ipv4>
 THRURNDIS_RNDIS_ROUTE_READY=1
 THRURNDIS_PORT_FORWARD_STATE=inactive
 THRURNDIS_PORT_FORWARD_STATE=pending:<ports>
 THRURNDIS_PORT_FORWARD_STATE=active:<ports>
 ```
 
+`THRURNDIS_RNDIS_IPV4` contains the canonical IPv4 address assigned to `usb0`
+and is emitted immediately before the ready marker after the complete gateway
+status succeeds. An empty `THRURNDIS_RNDIS_IPV4=` is emitted while gateway
+state is rebuilt and after teardown so the host can discard a stale address.
 `THRURNDIS_RNDIS_ROUTE_READY=0` is emitted before gateway state is rebuilt and
 when `usb0` disappears. The host must withdraw its `/1` routes on that marker,
 VM termination, or loss of the control channel. It may install them through
@@ -96,7 +101,7 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
 | sourced module | `port-forwarding` | Parse and validate the optional canonical port/range set from `/proc/cmdline`, prepare one shared TCP/UDP interval set plus rule fragments and marker state, and inspect exact installed state without mutating nftables. |
-| watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish readiness changes. |
+| watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish the canonical RNDIS IPv4 plus readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 
 The split is intentional: boot-time RNDIS module preparation must not depend on

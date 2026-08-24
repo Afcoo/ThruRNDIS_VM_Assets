@@ -46,6 +46,10 @@ announce_route_ready() {
     log_console "THRURNDIS_RNDIS_ROUTE_READY=$1"
 }
 
+announce_rndis_ipv4() {
+    log_console "THRURNDIS_RNDIS_IPV4=${1:-}"
+}
+
 run_with_timeout() {
     timeout_seconds=$1
     shift
@@ -109,6 +113,31 @@ interface_ipv4_cidr() {
         $BB awk '{ print $4 }' | $BB head -n 1
 }
 
+canonical_ipv4() {
+    value=$1
+    $BB awk -v value="$value" 'BEGIN {
+        if (value !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+            exit 1
+        }
+        if (split(value, octets, /\./) != 4) {
+            exit 1
+        }
+        for (i = 1; i <= 4; i++) {
+            if ((octets[i] != "0" && octets[i] ~ /^0/) || octets[i] + 0 > 255) {
+                exit 1
+            }
+        }
+        print value
+    }'
+}
+
+interface_ipv4_address() {
+    iface=$1
+    cidr=$(interface_ipv4_cidr "$iface")
+    [ -n "$cidr" ] || return 1
+    canonical_ipv4 "${cidr%%/*}"
+}
+
 interface_has_ipv4_cidr() {
     iface=$1
     expected_cidr=$2
@@ -165,7 +194,7 @@ configure_rndis_ipv4() {
         -T "$RNDIS_DHCP_TIMEOUT_SECONDS" $udhcpc_script >"$udhcpc_log" 2>&1
     rc=$?
     if [ "$rc" -eq 0 ]; then
-        ipv4=$(interface_ipv4_cidr "$iface")
+        ipv4=$(interface_ipv4_address "$iface" || true)
         dns_server=$(rndis_dns_server || true)
         if [ -n "$ipv4" ] && [ -n "$dns_server" ]; then
             log_console "RNDIS interface $iface IPv4 $ipv4, DNS $dns_server"
@@ -197,7 +226,7 @@ ensure_rndis_gateway() {
 
     ip link set dev "$iface" up 2>/dev/null || $BB ifconfig "$iface" up 2>/dev/null || true
 
-    ipv4=$(interface_ipv4_cidr "$iface")
+    ipv4=$(interface_ipv4_address "$iface" || true)
     gateway=$(interface_default_gateway "$iface")
     dns_server=$(rndis_dns_server || true)
     if [ -z "$ipv4" ] || [ -z "$gateway" ] || [ -z "$dns_server" ]; then
@@ -388,6 +417,7 @@ gateway_up() {
     # Withdraw host /1 routes while state is being rebuilt. A later =1 marker
     # is emitted only after the policy route, forwarding, and NAT all succeed.
     announce_route_ready 0
+    announce_rndis_ipv4 ""
     thrurndis_pf_announce_pending_state || true
     clear_gateway_state
 
@@ -431,7 +461,15 @@ gateway_up() {
         return 1
     fi
 
+    rndis_ipv4=$(interface_ipv4_address "$RNDIS_IFACE" || true)
+    if [ -z "$rndis_ipv4" ]; then
+        log_console "RNDIS interface $RNDIS_IFACE has no canonical IPv4 address after setup"
+        clear_gateway_state
+        return 1
+    fi
+
     log_console "gateway ready: host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
+    announce_rndis_ipv4 "$rndis_ipv4"
     announce_route_ready 1
     thrurndis_pf_announce_active_state || true
     return 0
@@ -442,6 +480,7 @@ gateway_down() {
     : >"$RNDIS_RESOLV_CONF"
     log_console "cleared host-link-to-RNDIS gateway state for $INGRESS_IFACE -> $RNDIS_IFACE"
     announce_route_ready 0
+    announce_rndis_ipv4 ""
     thrurndis_pf_announce_pending_state || true
     return 0
 }
@@ -459,11 +498,11 @@ gateway_status() {
         return 1
     fi
 
-    ipv4=$(interface_ipv4_cidr "$RNDIS_IFACE")
+    ipv4=$(interface_ipv4_address "$RNDIS_IFACE" || true)
     rndis_gateway=$(interface_default_gateway "$RNDIS_IFACE")
     rndis_dns=$(rndis_dns_server || true)
     if [ -z "$ipv4" ]; then
-        echo "$RNDIS_IFACE has no IPv4 address"
+        echo "$RNDIS_IFACE has no canonical IPv4 address"
         missing=1
     fi
     if [ -z "$rndis_gateway" ]; then

@@ -72,6 +72,10 @@ they are not host-side setup scripts and are not run by the macOS app.
   RNDIS gateway. It enables IPv4 forwarding, owns the narrow
   `eth0`-to-`usb0` rules, and DNATs UDP/TCP DNS addressed to
   `192.168.100.1:53` to RNDIS DNS. It emits
+  `THRURNDIS_RNDIS_IPV4=<canonical-ipv4>` immediately before readiness after
+  the complete gateway status succeeds. It emits an empty
+  `THRURNDIS_RNDIS_IPV4=` while rebuilding or after teardown so the host can
+  discard stale device addresses. It emits
   `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
   emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
 - `port-forwarding` is a side-effect-free shell module sourced from the

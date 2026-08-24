@@ -128,7 +128,26 @@ class ComplianceTests(unittest.TestCase):
         self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", gateway)
         self.assertIn("HOST_LINK_HOST_IPV4=192.168.100.2", gateway)
         self.assertIn("HOST_LINK_HOST_CIDR=192.168.100.2/32", gateway)
+        self.assertIn('THRURNDIS_RNDIS_IPV4=${1:-}', gateway)
         self.assertIn('THRURNDIS_RNDIS_ROUTE_READY=$1', gateway)
+        gateway_up = gateway[gateway.index("gateway_up() {"):gateway.index("gateway_down() {")]
+        gateway_down = gateway[gateway.index("gateway_down() {"):gateway.index("gateway_status() {")]
+        self.assertLess(
+            gateway_up.index("announce_route_ready 0"),
+            gateway_up.index('announce_rndis_ipv4 ""'),
+        )
+        self.assertLess(
+            gateway_up.index("if ! gateway_status"),
+            gateway_up.index('announce_rndis_ipv4 "$rndis_ipv4"'),
+        )
+        self.assertLess(
+            gateway_up.index('announce_rndis_ipv4 "$rndis_ipv4"'),
+            gateway_up.index("announce_route_ready 1"),
+        )
+        self.assertLess(
+            gateway_down.index("announce_route_ready 0"),
+            gateway_down.index('announce_rndis_ipv4 ""'),
+        )
         self.assertIn('from "$HOST_LINK_HOST_CIDR"', gateway)
         self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
         self.assertIn('ip saddr $HOST_LINK_HOST_CIDR', gateway)

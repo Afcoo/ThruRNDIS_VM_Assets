@@ -107,7 +107,7 @@ jobs:
       - name: Confirm build did not change tracked inputs
         run: git diff --exit-code
 
-      - name: Prepare downloadable verification artifact
+      - name: Prepare independently downloadable verification artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -131,11 +131,45 @@ jobs:
             sha256sum --check SHA256SUMS
           )
 
-      - name: Upload verified VM assets
+      # Raw single-file uploads keep each public filename as its artifact name.
+      - name: Upload corresponding-source archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: vm-assets-${{ github.sha }}
-          path: build/verification-artifact/*
+          path: build/verification-artifact/vm_assets-sources.tar.zst
           if-no-files-found: error
           retention-days: 7
-          compression-level: 0
+          archive: false
+
+      - name: Upload SPDX SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      - name: Upload third-party notices
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      - name: Upload verification checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      # Upload the binary last so a failed companion upload cannot leave a
+      # binary-only verification artifact set behind.
+      - name: Upload VM assets binary archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/vm_assets.zip
+          if-no-files-found: error
+          retention-days: 7
+          archive: false

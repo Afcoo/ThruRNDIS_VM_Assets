@@ -125,7 +125,14 @@ alter the guest's main routing table.
 
 ## Release Rules
 
-- Never publish a binary-only artifact or Release.
+- Never publish a binary-only Release or distribute `vm_assets.zip` as part of
+  an incomplete verification artifact set. A `Verify VM assets` run that
+  distributes `vm_assets.zip` must expose exactly five independently
+  downloadable Actions artifacts from the same verified commit and with the
+  same retention: `vm_assets.zip`,
+  `vm_assets-sources.tar.zst`, `sbom.spdx.json`, `THIRD_PARTY_NOTICES.md`, and
+  `SHA256SUMS`. Upload `vm_assets.zip` only after all four companion artifacts
+  have uploaded successfully so a failed run cannot leave a binary-only set.
 - A public Release must contain `vm_assets.zip`,
   `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
   `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.

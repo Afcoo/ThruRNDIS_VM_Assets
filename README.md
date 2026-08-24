@@ -185,10 +185,13 @@ request instead of changing `main` directly.
 
 Pushes, pull requests, and manual **Verify VM assets** runs perform shell
 linting, REUSE checks, a clean full build, compliance validation, and a QEMU
-`aarch64` boot smoke test. After every successful run, the workflow uploads a
-seven-day Actions artifact named `vm-assets-<commit-sha>` containing the same
-five-file set listed below. This temporary verification artifact is not a
-GitHub Release and is not selected by the app's latest-release installer.
+`aarch64` boot smoke test. After every successful run, the workflow uploads the
+five files listed below as independently downloadable, seven-day Actions
+artifacts from the same verified commit. It uploads `vm_assets.zip` only after
+the four companion artifacts succeed, so selecting the binary does not require
+downloading the much larger corresponding-source archive. This temporary
+verification artifact set is not a GitHub Release and is not selected by the
+app's latest-release installer.
 
 Releases are also manual. Run the **Release VM assets** workflow with a tag in
 the form `alpine-3.24.1-r1`. It creates a draft release, uploads and reads back

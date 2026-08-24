@@ -49,12 +49,14 @@ first RNDIS DNS server. DNS uses the same fixed source allowlist, policy route,
 conntrack return path, and masquerade as other forwarded IPv4 traffic.
 
 Before VM start, the app can optionally append
-`thrurndis.port_forward=<RNDIS port>:<Mac port>` to the kernel command line.
-The sourced `port-forwarding` module validates both ports as canonical
-decimal values in `1...65535` and prepares paired TCP and UDP DNAT, forward, and SNAT rule
-fragments. `eth0-usb0-gateway` includes those fragments in its single owned
-`thrurndis` nftables transaction, mapping both protocols from `usb0:<RNDIS port>` to
-`192.168.100.2:<Mac port>`. The value is immutable for that VM boot.
+`thrurndis.port_forward=<ports>` to the kernel command line. The value uses
+commas for individual entries and hyphens for inclusive ranges, for example
+`5050,6550-6557`. The sourced `port-forwarding` module validates the
+canonical expression and prepares one `inet_service` interval set plus paired
+TCP and UDP DNAT, forward, and SNAT rule fragments. `eth0-usb0-gateway`
+includes them in its single owned `thrurndis` nftables transaction. DNAT
+changes only the destination address to `192.168.100.2`, preserving the
+original destination port. The value is immutable for that VM boot.
 
 The machine-readable console contract is line-oriented:
 
@@ -64,8 +66,8 @@ THRURNDIS_VZNAT_CIDR=<guest-ipv4/prefix>
 THRURNDIS_VZNAT_GATEWAY=<vznat-gateway-ipv4>
 THRURNDIS_RNDIS_ROUTE_READY=1
 THRURNDIS_PORT_FORWARD_STATE=inactive
-THRURNDIS_PORT_FORWARD_STATE=pending:<rndis-port>:<mac-port>
-THRURNDIS_PORT_FORWARD_STATE=active:<rndis-port>:<mac-port>
+THRURNDIS_PORT_FORWARD_STATE=pending:<ports>
+THRURNDIS_PORT_FORWARD_STATE=active:<ports>
 ```
 
 `THRURNDIS_RNDIS_ROUTE_READY=0` is emitted before gateway state is rebuilt and
@@ -93,7 +95,7 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
-| sourced module | `port-forwarding` | Parse and validate the optional fixed paired TCP/UDP mapping from `/proc/cmdline`, prepare rule fragments and marker state, and inspect exact installed rules without mutating nftables. |
+| sourced module | `port-forwarding` | Parse and validate the optional canonical port/range set from `/proc/cmdline`, prepare one shared TCP/UDP interval set plus rule fragments and marker state, and inspect exact installed state without mutating nftables. |
 | watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 

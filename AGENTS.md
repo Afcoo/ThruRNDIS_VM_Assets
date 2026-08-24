@@ -77,16 +77,19 @@ they are not host-side setup scripts and are not run by the macOS app.
 - `port-forwarding` is a side-effect-free shell module sourced from the
   fixed path `/usr/local/libexec/thrurndis/port-forwarding` by
   `eth0-usb0-gateway`. It parses the optional immutable kernel argument
-  `thrurndis.port_forward=<rndis-port>:<mac-port>`, rejects duplicates,
-  malformed values, leading zeroes, and ports outside `1...65535`, prepares
-  validated nftables rule fragments, reports marker values, and inspects the
-  exact installed rules. It is not an init action or runtime control daemon.
-- Optional TCP and UDP forwarding adds fixed rules to the owned `thrurndis` nftables
-  chains for that VM boot. TCP and UDP packets arriving at `usb0:<rndis-port>` are DNATed to host
-  `192.168.100.2:<mac-port>`, admitted only on `usb0 -> eth0`, and both are SNATed to
-  guest `192.168.100.1`. The guest emits
+  `thrurndis.port_forward=<ports>`. The value is a canonical comma-separated
+  list of individual ports and inclusive hyphenated ranges. It rejects empty,
+  unsorted, overlapping, adjacent, duplicated, descending, leading-zero, and
+  out-of-range entries, prepares one nftables interval set plus validated rule
+  fragments, reports marker values, and inspects the exact installed state. It
+  is not an init action or runtime control daemon.
+- Optional TCP and UDP forwarding adds one owned `inet_service` interval set
+  and fixed rules to the `thrurndis` nftables table for that VM boot. TCP and
+  UDP packets whose destination port belongs to that set are DNATed to host
+  `192.168.100.2` without port translation, admitted only on
+  `usb0 -> eth0`, and SNATed to guest `192.168.100.1`. The guest emits
   `THRURNDIS_PORT_FORWARD_STATE=inactive`,
-  `pending:<rndis-port>:<mac-port>`, `active:<rndis-port>:<mac-port>`, or
+  `pending:<ports>`, `active:<ports>`, or
   `error:<code>` on the system console. Changing the mapping requires a new VM
   boot.
 - `eth0-usb0-gateway` remains the sole owner and mutator of the complete

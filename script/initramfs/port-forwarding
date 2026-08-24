@@ -6,9 +6,11 @@
 # that gateway's BB, interface/address constants, NFT_TABLE, and log_console.
 
 THRURNDIS_PF_BOOT_ARGUMENT_KEY=thrurndis.port_forward
+THRURNDIS_PF_SET_NAME=thrurndis_forwarded_ports
 THRURNDIS_PF_ENABLED=0
-THRURNDIS_PF_EXTERNAL_PORT=""
-THRURNDIS_PF_MAC_PORT=""
+THRURNDIS_PF_PORTS=""
+THRURNDIS_PF_NFT_ELEMENTS=""
+THRURNDIS_PF_SET_DEFINITION=""
 THRURNDIS_PF_PREROUTING_RULES=""
 THRURNDIS_PF_FORWARD_RULES=""
 THRURNDIS_PF_POSTROUTING_RULES=""
@@ -33,10 +35,71 @@ thrurndis_pf_valid_port() {
         && [ "$thrurndis_pf_port" -le 65535 ] 2>/dev/null
 }
 
+thrurndis_pf_validate_port_set() {
+    thrurndis_pf_value=$1
+    case "$thrurndis_pf_value" in
+        ""|,*|*,|*,,*) return 1 ;;
+    esac
+
+    thrurndis_pf_globbing_was_disabled=0
+    case $- in
+        *f*) thrurndis_pf_globbing_was_disabled=1 ;;
+        *) set -f ;;
+    esac
+    thrurndis_pf_saved_ifs=$IFS
+    IFS=,
+    # Word splitting is intentional after rejecting empty comma-separated
+    # elements. Globbing is disabled while the tokens are formed.
+    # shellcheck disable=SC2086
+    set -- $thrurndis_pf_value
+    IFS=$thrurndis_pf_saved_ifs
+    if [ "$thrurndis_pf_globbing_was_disabled" -eq 0 ]; then
+        set +f
+    fi
+
+    THRURNDIS_PF_PORTS=""
+    THRURNDIS_PF_NFT_ELEMENTS=""
+    thrurndis_pf_previous_end=0
+    for thrurndis_pf_element do
+        case "$thrurndis_pf_element" in
+            *-*)
+                thrurndis_pf_start=${thrurndis_pf_element%%-*}
+                thrurndis_pf_end=${thrurndis_pf_element#*-}
+                case "$thrurndis_pf_end" in
+                    *-*) return 1 ;;
+                esac
+                thrurndis_pf_valid_port "$thrurndis_pf_start" || return 1
+                thrurndis_pf_valid_port "$thrurndis_pf_end" || return 1
+                [ "$thrurndis_pf_start" -lt "$thrurndis_pf_end" ] || return 1
+                ;;
+            *)
+                thrurndis_pf_start=$thrurndis_pf_element
+                thrurndis_pf_end=$thrurndis_pf_element
+                thrurndis_pf_valid_port "$thrurndis_pf_start" || return 1
+                ;;
+        esac
+
+        if [ "$thrurndis_pf_previous_end" -ne 0 ]; then
+            [ "$thrurndis_pf_start" -gt $((thrurndis_pf_previous_end + 1)) ] \
+                || return 1
+        fi
+
+        if [ -n "$THRURNDIS_PF_NFT_ELEMENTS" ]; then
+            THRURNDIS_PF_NFT_ELEMENTS="$THRURNDIS_PF_NFT_ELEMENTS, $thrurndis_pf_element"
+        else
+            THRURNDIS_PF_NFT_ELEMENTS=$thrurndis_pf_element
+        fi
+        thrurndis_pf_previous_end=$thrurndis_pf_end
+    done
+
+    THRURNDIS_PF_PORTS=$thrurndis_pf_value
+    return 0
+}
+
 thrurndis_pf_load_configuration() {
     THRURNDIS_PF_ENABLED=0
-    THRURNDIS_PF_EXTERNAL_PORT=""
-    THRURNDIS_PF_MAC_PORT=""
+    THRURNDIS_PF_PORTS=""
+    THRURNDIS_PF_NFT_ELEMENTS=""
 
     if ! thrurndis_pf_cmdline=$("$BB" cat /proc/cmdline 2>/dev/null); then
         log_console "cannot read /proc/cmdline for $THRURNDIS_PF_BOOT_ARGUMENT_KEY"
@@ -79,32 +142,19 @@ thrurndis_pf_load_configuration() {
         log_console "duplicate $THRURNDIS_PF_BOOT_ARGUMENT_KEY kernel arguments"
         return 1
     fi
-
-    thrurndis_pf_external_port=${thrurndis_pf_configured_value%%:*}
-    if [ "$thrurndis_pf_configured_value" = "$thrurndis_pf_external_port" ]; then
-        log_console "invalid $THRURNDIS_PF_BOOT_ARGUMENT_KEY kernel argument"
-        return 1
-    fi
-    thrurndis_pf_mac_port=${thrurndis_pf_configured_value#*:}
-    case "$thrurndis_pf_mac_port" in
-        *:*)
-            log_console "invalid $THRURNDIS_PF_BOOT_ARGUMENT_KEY kernel argument"
-            return 1
-            ;;
-    esac
-    if ! thrurndis_pf_valid_port "$thrurndis_pf_external_port" \
-        || ! thrurndis_pf_valid_port "$thrurndis_pf_mac_port"; then
-        log_console "invalid $THRURNDIS_PF_BOOT_ARGUMENT_KEY ports"
+    if ! thrurndis_pf_validate_port_set "$thrurndis_pf_configured_value"; then
+        THRURNDIS_PF_PORTS=""
+        THRURNDIS_PF_NFT_ELEMENTS=""
+        log_console "invalid $THRURNDIS_PF_BOOT_ARGUMENT_KEY port set"
         return 1
     fi
 
     THRURNDIS_PF_ENABLED=1
-    THRURNDIS_PF_EXTERNAL_PORT=$thrurndis_pf_external_port
-    THRURNDIS_PF_MAC_PORT=$thrurndis_pf_mac_port
     return 0
 }
 
 thrurndis_pf_prepare_nft_rules() {
+    THRURNDIS_PF_SET_DEFINITION=""
     THRURNDIS_PF_PREROUTING_RULES=""
     THRURNDIS_PF_FORWARD_RULES=""
     THRURNDIS_PF_POSTROUTING_RULES=""
@@ -112,12 +162,17 @@ thrurndis_pf_prepare_nft_rules() {
     thrurndis_pf_load_configuration || return 1
     [ "$THRURNDIS_PF_ENABLED" -eq 1 ] || return 0
 
-    THRURNDIS_PF_PREROUTING_RULES="iifname \"$RNDIS_IFACE\" tcp dport $THRURNDIS_PF_EXTERNAL_PORT counter dnat to $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT
-        iifname \"$RNDIS_IFACE\" udp dport $THRURNDIS_PF_EXTERNAL_PORT counter dnat to $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT"
-    THRURNDIS_PF_FORWARD_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport $THRURNDIS_PF_MAC_PORT ct state new,established counter accept
-        iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 udp dport $THRURNDIS_PF_MAC_PORT ct state new,established counter accept"
-    THRURNDIS_PF_POSTROUTING_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport $THRURNDIS_PF_MAC_PORT counter snat to $HOST_LINK_GUEST_IPV4
-        iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 udp dport $THRURNDIS_PF_MAC_PORT counter snat to $HOST_LINK_GUEST_IPV4"
+    THRURNDIS_PF_SET_DEFINITION="set $THRURNDIS_PF_SET_NAME {
+        type inet_service
+        flags interval
+        elements = { $THRURNDIS_PF_NFT_ELEMENTS }
+    }"
+    THRURNDIS_PF_PREROUTING_RULES="iifname \"$RNDIS_IFACE\" tcp dport @$THRURNDIS_PF_SET_NAME counter dnat to $HOST_LINK_HOST_IPV4
+        iifname \"$RNDIS_IFACE\" udp dport @$THRURNDIS_PF_SET_NAME counter dnat to $HOST_LINK_HOST_IPV4"
+    THRURNDIS_PF_FORWARD_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport @$THRURNDIS_PF_SET_NAME ct state new,established counter accept
+        iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 udp dport @$THRURNDIS_PF_SET_NAME ct state new,established counter accept"
+    THRURNDIS_PF_POSTROUTING_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport @$THRURNDIS_PF_SET_NAME counter snat to $HOST_LINK_GUEST_IPV4
+        iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 udp dport @$THRURNDIS_PF_SET_NAME counter snat to $HOST_LINK_GUEST_IPV4"
 }
 
 thrurndis_pf_announce_pending_state() {
@@ -127,7 +182,7 @@ thrurndis_pf_announce_pending_state() {
     fi
 
     if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
-        thrurndis_pf_announce_state "pending:$THRURNDIS_PF_EXTERNAL_PORT:$THRURNDIS_PF_MAC_PORT"
+        thrurndis_pf_announce_state "pending:$THRURNDIS_PF_PORTS"
     else
         thrurndis_pf_announce_state inactive
     fi
@@ -140,7 +195,7 @@ thrurndis_pf_announce_active_state() {
     fi
 
     if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
-        thrurndis_pf_announce_state "active:$THRURNDIS_PF_EXTERNAL_PORT:$THRURNDIS_PF_MAC_PORT"
+        thrurndis_pf_announce_state "active:$THRURNDIS_PF_PORTS"
     else
         thrurndis_pf_announce_state inactive
     fi
@@ -155,50 +210,81 @@ thrurndis_pf_rules_ready() {
     fi
 
     if [ "$THRURNDIS_PF_ENABLED" -eq 0 ]; then
+        if nft list set ip "$NFT_TABLE" "$THRURNDIS_PF_SET_NAME" \
+            >/dev/null 2>&1; then
+            echo "unexpected port forwarding set"
+            return 1
+        fi
         if nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\"" |
-            "$BB" grep -F -w "dnat to $HOST_LINK_HOST_IPV4" >/dev/null 2>&1; then
+            "$BB" grep -F -w "dnat to $HOST_LINK_HOST_IPV4" \
+                >/dev/null 2>&1; then
             echo "unexpected port forwarding DNAT rule"
             return 1
         fi
         if nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\"" |
-            "$BB" grep -E "(tcp|udp) dport" >/dev/null 2>&1; then
+            "$BB" grep -E '(tcp|udp) dport' >/dev/null 2>&1; then
             echo "unexpected port forwarding allow rule"
             return 1
         fi
         if nft list chain ip "$NFT_TABLE" postrouting 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\"" |
-            "$BB" grep -F -w "snat to $HOST_LINK_GUEST_IPV4" >/dev/null 2>&1; then
+            "$BB" grep -F -w "snat to $HOST_LINK_GUEST_IPV4" \
+                >/dev/null 2>&1; then
             echo "unexpected port forwarding SNAT rule"
             return 1
         fi
         return 0
     fi
 
+    if ! thrurndis_pf_set_output=$(
+        nft list set ip "$NFT_TABLE" "$THRURNDIS_PF_SET_NAME" 2>/dev/null
+    ); then
+        echo "missing exact port forwarding interval set $THRURNDIS_PF_PORTS"
+        thrurndis_pf_failures=1
+    else
+        for thrurndis_pf_expected_set_line in \
+            "type inet_service" \
+            "flags interval" \
+            "elements = { $THRURNDIS_PF_NFT_ELEMENTS }"; do
+            if ! printf '%s\n' "$thrurndis_pf_set_output" |
+                "$BB" grep -F "$thrurndis_pf_expected_set_line" \
+                    >/dev/null 2>&1; then
+                echo "missing exact port forwarding interval set $THRURNDIS_PF_PORTS"
+                thrurndis_pf_failures=1
+                break
+            fi
+        done
+    fi
+
     for thrurndis_pf_protocol in tcp udp; do
         if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\"" |
-            "$BB" grep -F -w "$thrurndis_pf_protocol dport $THRURNDIS_PF_EXTERNAL_PORT" |
-            "$BB" grep -F -w "dnat to $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT" >/dev/null 2>&1; then
-            echo "missing $thrurndis_pf_protocol DNAT $RNDIS_IFACE:$THRURNDIS_PF_EXTERNAL_PORT -> $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT"
+            "$BB" grep -F "$thrurndis_pf_protocol dport @$THRURNDIS_PF_SET_NAME" |
+            "$BB" grep -F -w "dnat to $HOST_LINK_HOST_IPV4" |
+            "$BB" grep -v -F "dnat to $HOST_LINK_HOST_IPV4:" \
+                >/dev/null 2>&1; then
+            echo "missing $thrurndis_pf_protocol DNAT to $HOST_LINK_HOST_IPV4 without port translation"
             thrurndis_pf_failures=1
         fi
         if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\"" |
             "$BB" grep -F -w "ip daddr $HOST_LINK_HOST_IPV4" |
-            "$BB" grep -F -w "$thrurndis_pf_protocol dport $THRURNDIS_PF_MAC_PORT" |
+            "$BB" grep -F "$thrurndis_pf_protocol dport @$THRURNDIS_PF_SET_NAME" |
             "$BB" grep -E 'ct state (new,established|established,new)([[:space:]]|$)' |
-            "$BB" grep -F -w "accept" >/dev/null 2>&1; then
-            echo "missing $thrurndis_pf_protocol forward allow $RNDIS_IFACE -> $HOST_LINK_HOST_IPV4:$THRURNDIS_PF_MAC_PORT on $INGRESS_IFACE"
+            "$BB" grep -F "accept" >/dev/null 2>&1; then
+            echo "missing $thrurndis_pf_protocol forward allow for port set $THRURNDIS_PF_PORTS"
             thrurndis_pf_failures=1
         fi
         if ! nft list chain ip "$NFT_TABLE" postrouting 2>/dev/null |
             "$BB" grep -F "iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\"" |
             "$BB" grep -F -w "ip daddr $HOST_LINK_HOST_IPV4" |
-            "$BB" grep -F -w "$thrurndis_pf_protocol dport $THRURNDIS_PF_MAC_PORT" |
-            "$BB" grep -F -w "snat to $HOST_LINK_GUEST_IPV4" >/dev/null 2>&1; then
-            echo "missing $thrurndis_pf_protocol SNAT to $HOST_LINK_GUEST_IPV4 for Mac port $THRURNDIS_PF_MAC_PORT"
+            "$BB" grep -F "$thrurndis_pf_protocol dport @$THRURNDIS_PF_SET_NAME" |
+            "$BB" grep -F -w "snat to $HOST_LINK_GUEST_IPV4" |
+            "$BB" grep -v -F "snat to $HOST_LINK_GUEST_IPV4:" \
+                >/dev/null 2>&1; then
+            echo "missing $thrurndis_pf_protocol SNAT for port set $THRURNDIS_PF_PORTS"
             thrurndis_pf_failures=1
         fi
     done

@@ -86,6 +86,8 @@ jobs:
             exit 1
           fi
 
+          printf 'VM_ASSET_VERSION=%s\n' "$asset_version" >> "$GITHUB_ENV"
+
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             tag_commit=$(git rev-list -n 1 "$RELEASE_TAG")
             if [[ $tag_commit != "$release_commit" ]]; then
@@ -102,6 +104,8 @@ jobs:
           printf '%s\n' \
             "ThruRNDIS VM assets for the locked Alpine inputs at ${release_commit}." \
             "" \
+            "VM asset version: ${VM_ASSET_VERSION}." \
+            "" \
             "The binary is a multi-license aggregate. Download vm_assets-sources.tar.zst," \
             "THIRD_PARTY_NOTICES.md, and sbom.spdx.json with vm_assets.zip." \
             > "$RUNNER_TEMP/release-notes.md"
@@ -116,6 +120,8 @@ jobs:
               echo "Existing draft targets $target, not $release_commit." >&2
               exit 1
             fi
+            gh release edit "$RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
           else
             gh release create "$RELEASE_TAG" \
               --draft \
@@ -124,6 +130,13 @@ jobs:
               --target "$release_commit" \
               --title "$RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+
+          expected_notes=$(<"$RUNNER_TEMP/release-notes.md")
+          actual_notes=$(gh release view "$RELEASE_TAG" --json body --jq '.body')
+          if [[ $actual_notes != "$expected_notes" ]]; then
+            echo "Draft Release notes do not match the generated notes." >&2
+            exit 1
           fi
 
       - name: Install build and verification tools
@@ -319,8 +332,17 @@ jobs:
             --prerelease=false \
             --latest=false
           gh release view "$RELEASE_TAG" \
-            --json isDraft,isPrerelease \
-            --jq '.isDraft == false and .isPrerelease == false' | grep -Fx true
+            --json body,isDraft,isPrerelease > "$release_json"
+          jq --exit-status \
+            '.isDraft == false and .isPrerelease == false' \
+            "$release_json" >/dev/null
+
+          expected_notes=$(<"$RUNNER_TEMP/release-notes.md")
+          actual_notes=$(jq --raw-output '.body' "$release_json")
+          if [[ $actual_notes != "$expected_notes" ]]; then
+            echo "Published Release notes do not match the generated notes." >&2
+            exit 1
+          fi
 
           current_latest_tag=$(gh api \
             "repos/$GITHUB_REPOSITORY/releases/latest" \

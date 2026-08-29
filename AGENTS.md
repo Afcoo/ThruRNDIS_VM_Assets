@@ -25,14 +25,23 @@ extras.
   app uses `Image-lts` as the `VZLinuxBootLoader` kernel and
   `initramfs-thrurndis-lts` as the initial RAM disk. A user-managed scratch disk
   is optional and separate from the RAM-backed initramfs root.
-- The guest is the packet-forwarding boundary for `macOS WireGuard client ->
-  VZNAT guest endpoint -> guest wg0 -> policy routing and nftables masquerade ->
-  USB RNDIS usb0`. The app does not forward packet payloads itself.
-- WireGuard keys and configuration belong to the macOS app, not to this asset
-  repository. The app exposes only its generated `Shared/wg0.conf` directory
-  through the read-only `thrurndis-wireguard` VirtioFS share. Never add private
-  keys, WireGuard configuration, fixed WireGuard ports, or fixed overlay CIDRs
-  to `vm_assets.zip`, the source bundle, manifests, examples, or build inputs.
+- The guest is the packet-forwarding boundary for `macOS 192.168.100.2/24 /1
+  routes -> feth and the VM-created VZNAT bridge -> guest eth0
+  192.168.100.1/24 -> ingress policy routing and nftables masquerade -> USB
+  RNDIS usb0`. The app and privileged helper configure the host link and
+  routes but do not forward packet payloads themselves.
+- macOS uses fixed guest host-link address `192.168.100.1` as its DNS server.
+  DNS packets from fixed host source `192.168.100.2/32` addressed to
+  `192.168.100.1:53` are DNATed for both UDP and TCP to the first usable IPv4
+  DNS server from the live `usb0` DHCP lease, then follow the same policy route
+  and masquerade path as other host traffic.
+- The VZNAT DHCP subnet and guest lease are runtime-assigned and exist to let
+  the helper discover the VM-created bridge. Never embed a fixed VZNAT DHCP
+  address or subnet in `vm_assets.zip`, the source bundle, manifests, examples,
+  or build inputs. The separate fixed host-link subnet is `192.168.100.0/24`.
+  WireGuard and its former VirtioFS configuration share are no longer part of
+  the guest architecture; do not reintroduce keys, configuration, tools,
+  modules, or legacy init scripts.
 
 ### Guest init contract
 
@@ -46,29 +55,62 @@ they are not host-side setup scripts and are not run by the macOS app.
 - `init-rndis` (`::wait`) loads the XHCI, USB networking, and RNDIS host modules
   and rescans devices. Keep this boot-time preparation separate from the
   watcher so it does not depend on `usb0` already existing.
-- `init-virtiofs-wgconf` (`::wait`) loads `virtiofs`, mounts the
-  `thrurndis-wireguard` share read-only at `/run/thrurndis-wireguard`, and
-  requires a nonempty `wg0.conf` before the network one-shot starts.
-- `init-network` (`::once`) configures the VZNAT NIC `eth0` with DHCP, reads the
-  runtime `ListenPort`, emits
-  `THRURNDIS_WG_ENDPOINT=<guest-nat-ip>:<listen-port>`, and starts `wg0` from
-  `/run/thrurndis-wireguard/wg0.conf`.
+- `init-network` (`::wait`) configures the VZNAT NIC `eth0` with DHCP, adds the
+  fixed secondary host-link address `192.168.100.1/24`, and emits the
+  machine-readable `THRURNDIS_VZNAT_IPV4`, `THRURNDIS_VZNAT_CIDR`, and
+  `THRURNDIS_VZNAT_GATEWAY` console markers from the live lease. Those markers
+  identify the VM-created bridge; they are not the data-plane address. The host
+  must not install its `/1` routes through `192.168.100.1` until the
+  gateway-ready marker is also `1`.
 - `usb0-watcher` (`::respawn`) watches the fixed RNDIS interface `usb0`, retries
   gateway setup when the interface appears or its state becomes incomplete,
   and clears stale gateway state when the interface disappears. It must remain
   tolerant of late USB attachment, detach, and reconnect.
-- `wg0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
-  obtains `usb0` DHCP, derives the policy source from the live `wg0` connected
-  IPv4 CIDR, installs source policy routing through the RNDIS gateway, enables
-  IPv4 forwarding, and owns the narrow `wg0`-to-`usb0` nftables forwarding and
-  masquerade rules.
-- `init-console` (`hvc0::respawn`) attaches the interactive shell to the virtio
+- `eth0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
+  obtains `usb0` DHCP. Its policy route and nftables rules admit only fixed host
+  source `192.168.100.2/32` arriving on `eth0`, then forward it through the
+  RNDIS gateway. It enables IPv4 forwarding, owns the narrow
+  `eth0`-to-`usb0` rules, and DNATs UDP/TCP DNS addressed to
+  `192.168.100.1:53` to RNDIS DNS. It emits
+  `THRURNDIS_RNDIS_IPV4=<canonical-ipv4>` immediately before readiness after
+  the complete gateway status succeeds. It emits an empty
+  `THRURNDIS_RNDIS_IPV4=` while rebuilding or after teardown so the host can
+  discard stale device addresses. It emits
+  `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
+  emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
+- `port-forwarding` is a side-effect-free shell module sourced from the
+  fixed path `/usr/local/libexec/thrurndis/port-forwarding` by
+  `eth0-usb0-gateway`. It parses the optional immutable kernel argument
+  `thrurndis.port_forward=<ports>`. The value is a canonical comma-separated
+  list of individual ports and inclusive hyphenated ranges. It rejects empty,
+  unsorted, overlapping, adjacent, duplicated, descending, leading-zero, and
+  out-of-range entries, prepares one nftables interval set plus validated rule
+  fragments, reports marker values, and inspects the exact installed state. It
+  is not an init action or runtime control daemon.
+- Optional TCP and UDP forwarding adds one owned `inet_service` interval set
+  and fixed rules to the `thrurndis` nftables table for that VM boot. TCP and
+  UDP packets whose destination port belongs to that set are DNATed to host
+  `192.168.100.2` without port translation, admitted only on
+  `usb0 -> eth0`, and SNATed to guest `192.168.100.1`. The guest emits
+  `THRURNDIS_PORT_FORWARD_STATE=inactive`,
+  `pending:<ports>`, `active:<ports>`, or
+  `error:<code>` on the system console. Changing the mapping requires a new VM
+  boot.
+- `eth0-usb0-gateway` remains the sole owner and mutator of the complete
+  `thrurndis` nftables table. The sourced module must never invoke `nft` for
+  mutation or install its rules in a separate transaction.
+- Before `usb0` DHCP, `eth0-usb0-gateway` clears `/etc/resolv.conf`; Alpine's
+  BusyBox DHCP script then atomically writes the live RNDIS DNS from option 6.
+  The gateway accepts only the first value routable as IPv4. Do not hard-code a
+  public resolver or treat the earlier VZNAT DHCP resolver as RNDIS upstream.
+- `init-console` (`hvc0::respawn`) attaches the interactive shell to the Virtio
   console and restores it when the shell exits.
 
 Keep the inittab wiring and these responsibility boundaries synchronized with
 the scripts. In particular, do not fold RNDIS module preparation into the
-runtime watcher, do not make the one-shot wait for `usb0`, and do not embed the
-app-owned WireGuard configuration into the initramfs.
+runtime watcher and do not make the VZNAT one-shot wait for `usb0`. Keep the
+one-shot ahead of the watcher so `eth0` DHCP completes before `usb0` DHCP can
+alter the guest's main routing table.
 
 ## Build and Provenance Rules
 
@@ -87,12 +129,26 @@ app-owned WireGuard configuration into the initramfs.
 
 ## Release Rules
 
-- Never publish a binary-only artifact or Release.
+- Never publish a binary-only Release or distribute `vm_assets.zip` as part of
+  an incomplete verification artifact set. A `Verify VM assets` run that
+  distributes `vm_assets.zip` must expose exactly five independently
+  downloadable Actions artifacts from the same verified commit and with the
+  same retention: `vm_assets.zip`,
+  `vm_assets-sources.tar.zst`, `sbom.spdx.json`, `THIRD_PARTY_NOTICES.md`, and
+  `SHA256SUMS`. Upload `vm_assets.zip` only after all four companion artifacts
+  have uploaded successfully so a failed run cannot leave a binary-only set.
 - A public Release must contain `vm_assets.zip`,
   `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
   `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.
 - Create Releases as drafts. Publish only after the binary, corresponding
   source, notices, SBOM, and checksums have all passed readback verification.
+- Versioned Release tags use
+  `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`, where both versions
+  match the checked-in configuration. Legacy `alpine-*` tags are a separate
+  namespace and never contribute to the versioned revision number.
+- Publish versioned artifacts as formal, non-prerelease Releases with
+  `--latest=false`. Keep the legacy `alpine-3.24.1-r2` Release as GitHub Latest
+  for ThruRNDIS v0.3.0 clients that still request `/releases/latest`.
 - GitHub's automatically generated repository source archive is not a
   substitute for the third-party corresponding-source bundle.
 - Do not delete or replace a source bundle while its matching binary Release
@@ -152,20 +208,26 @@ app-owned WireGuard configuration into the initramfs.
 
 ### Select and publish the tag
 
-1. Re-read `ALPINE_VERSION` from `config/alpine.env` at the verified merged
-   commit and require `major.minor.patch` format. Immediately before release
-   dispatch, confirm the default branch still points to that same verified
-   commit; if it moved, stop and verify the new commit before recalculating.
+1. Re-read `assetVersion` from `config/vm-assets.json` and `ALPINE_VERSION` from
+   `config/alpine.env` at the verified merged commit. Require a positive integer
+   asset version and `major.minor.patch` Alpine version. Immediately before
+   release dispatch, confirm the default branch still points to that same
+   verified commit; if it moved, stop and verify the new commit before
+   recalculating.
 2. List all GitHub Releases, including drafts, and repository tags matching
-   `alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate revision numbers, a tag
-   without its corresponding Release, a Release without its tag, or any
-   malformed matching name.
+   `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate
+   revision numbers, a tag without its corresponding Release, a Release without
+   its tag, or any malformed matching name. Separately require
+   `/releases/latest` to resolve to the published, non-prerelease legacy
+   `alpine-3.24.1-r2` Release.
 3. Choose the next tag deterministically:
-   - If no Release exists for the merged `ALPINE_VERSION`, use
-     `alpine-<ALPINE_VERSION>-r1`, even when older Alpine versions have
-     Releases.
+   - If no Release exists for this asset-version namespace and the merged
+     `ALPINE_VERSION`, use
+     `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r1`, even when legacy
+     tags or older Alpine versions have Releases.
    - If Releases already exist for the same Alpine version, use one greater
-     than the largest existing revision: `max(r<N>) + 1`.
+     than the largest revision in the same asset-version namespace:
+     `max(r<N>) + 1`.
    - Exception for retrying this runbook: if its failed release attempt left a
      draft at the intended next tag and that draft targets the same verified
      commit, reuse that tag. Do not increment merely because the failed draft
@@ -182,6 +244,8 @@ app-owned WireGuard configuration into the initramfs.
 6. Independently read the final Release and require all of the following:
    - `targetCommitish` is the verified merged default-branch commit.
    - `isDraft` is `false`.
+   - `isPrerelease` is `false`, and the Release is not GitHub Latest.
+   - `/releases/latest` still resolves to `alpine-3.24.1-r2`.
    - The asset allowlist contains exactly five non-empty files and no others:
      `vm_assets.zip`, `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
      `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.
@@ -217,7 +281,8 @@ app-owned WireGuard configuration into the initramfs.
 - Run the full clean Linux build and compliance verifier.
 - Confirm that every APKBUILD source checksum and every downloaded artifact
   checksum matches the recorded value.
-- Inspect the final initramfs for staging files, private keys, WireGuard
-  configuration, package metadata, untracked binaries, and firmware.
+- Inspect the final initramfs for staging files, private keys, legacy WireGuard
+  or VirtioFS configuration artifacts, package metadata, untracked binaries,
+  and firmware.
 - Confirm that the SPDX SBOM, notices, package lock, file provenance map, and
   both release archives agree before publishing.

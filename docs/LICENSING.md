@@ -31,8 +31,8 @@ assumption.
 `vm_assets.zip` is a multi-license aggregate. Each packaged component keeps
 its upstream copyright notices, license terms, and source obligations. In
 particular, placing the repository under GPL does not relicense the Linux
-kernel, BusyBox, WireGuard tools, Alpine packages, permissively licensed
-libraries, or any future firmware.
+kernel, BusyBox, Alpine packages, permissively licensed libraries, or any
+future firmware.
 
 Every binary distribution contains:
 
@@ -76,8 +76,9 @@ A release is rejected when any of these conditions holds:
 - required GPL/LGPL sources, patches, configurations, or build/install scripts
   are absent;
 - a required Apache, BSD, MIT, X11, Zlib, copyright, or NOTICE text is absent;
-- a private key, WireGuard configuration, APK staging file, cache, undeclared
-  firmware, or other prohibited file enters the distribution; or
+- a private key, obsolete WireGuard configuration or tools, APK staging file,
+  cache, undeclared firmware, or other prohibited file enters the
+  distribution; or
 - the archive, notices, SBOM, lock, source manifest, and checksum manifest do
   not describe the same content.
 

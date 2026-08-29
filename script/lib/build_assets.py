@@ -27,9 +27,10 @@ ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG = ROOT / "config/alpine.env"
 DEFAULT_LOCK = ROOT / "config/packages.lock.json"
 INITRAMFS_SCRIPTS = (
-    "rcS", "init-console", "init-rndis", "init-virtiofs-wgconf",
-    "init-network", "usb0-watcher", "wg0-usb0-gateway",
+    "rcS", "init-console", "init-rndis", "init-network", "usb0-watcher",
+    "eth0-usb0-gateway",
 )
+INITRAMFS_SOURCED_MODULES = ("port-forwarding",)
 
 
 class GuestPathError(ValueError):
@@ -483,8 +484,7 @@ def copy_module_closure(
 def write_inittab(root: pathlib.Path, owners: dict[str, str]) -> None:
     add_file(root, "etc/inittab", """::sysinit:/etc/init.d/rcS
 ::wait:/usr/local/sbin/init-rndis
-::wait:/usr/local/sbin/init-virtiofs-wgconf
-::once:/usr/local/sbin/init-network
+::wait:/usr/local/sbin/init-network
 ::respawn:/usr/local/sbin/usb0-watcher
 hvc0::respawn:/usr/local/sbin/init-console
 ::restart:/sbin/init
@@ -496,7 +496,8 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
     for directory, mode in (
         ("bin", 0o755), ("sbin", 0o755), ("dev", 0o755),
         ("etc/init.d", 0o755), ("root", 0o700), ("run", 0o755),
-        ("tmp", 0o1777), ("usr/local/sbin", 0o755), ("var/log", 0o755),
+        ("tmp", 0o1777), ("usr/local/libexec/thrurndis", 0o755),
+        ("usr/local/sbin", 0o755), ("var/log", 0o755),
     ):
         path = root / directory
         path.mkdir(parents=True, exist_ok=True)
@@ -509,6 +510,12 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
             fail(f"Missing project initramfs script: {source}")
         destination = "etc/init.d/rcS" if name == "rcS" else f"usr/local/sbin/{name}"
         add_file(root, destination, source.read_bytes(), 0o755, "project", owners)
+    for name in INITRAMFS_SOURCED_MODULES:
+        source = SCRIPT_DIR / "initramfs" / name
+        if not source.is_file():
+            fail(f"Missing project initramfs module: {source}")
+        destination = f"usr/local/libexec/thrurndis/{name}"
+        add_file(root, destination, source.read_bytes(), 0o644, "project", owners)
     add_file(root, "etc/resolv.conf", b"", 0o644, "project", owners)
 
 
@@ -599,6 +606,9 @@ def validate_lock(env: dict[str, str], lock: dict[str, object]) -> None:
     for lock_key, env_key in pairs.items():
         if alpine.get(lock_key) != env.get(env_key):
             fail(f"Config/lock mismatch for {env_key}; run script/update_dependencies.py")
+    configured_roots = env.get("GUEST_ROOT_PACKAGES", "").split()
+    if lock.get("rootPackages") != configured_roots:
+        fail("Config/lock mismatch for GUEST_ROOT_PACKAGES; run script/update_dependencies.py")
 
 
 def main() -> int:
@@ -689,7 +699,7 @@ def main() -> int:
             fail(f"Firmware payloads are forbidden in the initramfs: {forbidden_firmware}")
     required_commands = (
         "bin/sh", "usr/bin/busybox", "sbin/ip", "usr/sbin/nft",
-        "usr/bin/wg", "usr/bin/wg-quick", "usr/bin/tcpdump",
+        "usr/bin/tcpdump",
     )
     for relative in required_commands:
         try:

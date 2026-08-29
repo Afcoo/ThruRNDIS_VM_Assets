@@ -195,6 +195,16 @@ def load_lock(path: Path) -> tuple[dict[str, Any], list[Package]]:
     return raw, packages
 
 
+def load_vm_asset_config(path: Path) -> dict[str, Any]:
+    raw = load_json(path)
+    if not isinstance(raw, dict) or raw.get("schemaVersion") != 1:
+        raise ComplianceError(f"{path}: schemaVersion must be 1")
+    version = raw.get("assetVersion")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ComplianceError(f"{path}: assetVersion must be a positive integer")
+    return raw
+
+
 def load_policy(path: Path) -> dict[str, Any]:
     try:
         if tomllib is not None:
@@ -541,7 +551,10 @@ def verify_file_map(entries: Sequence[CpioEntry], file_map: Mapping[str, Mapping
 
 def check_initramfs_content(entries: Sequence[CpioEntry]) -> None:
     forbidden_parts = {".PKGINFO", ".cache"}
-    forbidden_exact = {"wg0.conf"}
+    forbidden_exact = {
+        "wg0.conf", "wg", "wg-quick", "init-virtiofs-wgconf",
+        "wg0-usb0-gateway",
+    }
     for entry in entries:
         parts = PurePosixPath(entry.path).parts
         lower_name = PurePosixPath(entry.path).name.lower()
@@ -549,7 +562,11 @@ def check_initramfs_content(entries: Sequence[CpioEntry]) -> None:
             raise ComplianceError(f"staging metadata leaked into initramfs: {entry.path}")
         if parts[:2] == ("lib", "firmware") or parts[:3] == ("usr", "lib", "firmware"):
             raise ComplianceError(f"firmware is forbidden without explicit provenance: {entry.path}")
-        if lower_name in forbidden_exact or lower_name.endswith((".key", ".pem", ".p12", ".pfx")):
+        if (
+            lower_name in forbidden_exact
+            or lower_name.startswith("wireguard.ko")
+            or lower_name.endswith((".key", ".pem", ".p12", ".pfx"))
+        ):
             raise ComplianceError(f"secret or runtime configuration leaked into initramfs: {entry.path}")
 
 

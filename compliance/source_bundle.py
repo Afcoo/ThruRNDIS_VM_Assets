@@ -30,6 +30,7 @@ from common import (
     iso_timestamp,
     load_lock,
     load_policy,
+    load_vm_asset_config,
     normalize_license,
     pkginfo_index,
     require_relative_path,
@@ -759,6 +760,7 @@ def run(arguments: argparse.Namespace) -> None:
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     commit = git_archive(repo, staging / "builder")
+    asset_config = load_vm_asset_config(staging / "builder/config/vm-assets.json")
     epoch = source_date_epoch(repo)
     copy_package_evidence(runtime_packages, build_dir / "provenance/packages", archives, staging / "packages")
 
@@ -830,6 +832,7 @@ def run(arguments: argparse.Namespace) -> None:
     files = source_inventory(staging)
     source_manifest = {
         "schemaVersion": 1,
+        "assetVersion": asset_config["assetVersion"],
         "created": iso_timestamp(epoch),
         "builderCommit": commit,
         "alpine": lock["alpine"],

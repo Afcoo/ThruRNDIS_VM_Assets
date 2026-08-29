@@ -14,26 +14,6 @@
   },
   "packages": [
     {
-      "apkIndexChecksum": "Q1Tmocg1FubGlvWQ6+OAUIG9yLWko=",
-      "aportsCommit": "1522c3193610902d8493f9790a2755c11f21f26d",
-      "datahash": "bfbd96492477bb776613589e4de2bfde5f820473b8e306f78939862edc6cb19a",
-      "dependencies": [
-        "/bin/sh",
-        "so:libc.musl-aarch64.so.1",
-        "so:libreadline.so.8"
-      ],
-      "file": "bash-5.3.9-r1.apk",
-      "license": "GPL-3.0-or-later",
-      "name": "bash",
-      "origin": "bash",
-      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
-      "repositoryName": "main",
-      "role": "runtime",
-      "sha256": "95f4f976bdf2f4ca18ff41c32916eb6d7b12a0dae12504d55d04427460d6542f",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/bash-5.3.9-r1.apk",
-      "version": "5.3.9-r1"
-    },
-    {
       "apkIndexChecksum": "Q1cc/8KYHy1Us5N8Jb4vUWmz+wRTI=",
       "aportsCommit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
       "datahash": "57b1a4f64a48ecdb097dfa1f32cf10a0dc9d572f77e4bc8d7b4adcf0f0b075b6",
@@ -412,22 +392,6 @@
       "version": "1.1.6-r1"
     },
     {
-      "apkIndexChecksum": "Q1nllP89iiVO66olJrfKuzbskun4Y=",
-      "aportsCommit": "bcbc81c3c1eba3078a4f536a8a0d2c907a5b21ff",
-      "datahash": "c2e6f7c800fb70622736e27910e81901b860ef5983c8a6d7f880903bb2156197",
-      "dependencies": [],
-      "file": "openresolv-3.17.4-r0.apk",
-      "license": "BSD-2-Clause",
-      "name": "openresolv",
-      "origin": "openresolv",
-      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
-      "repositoryName": "main",
-      "role": "runtime",
-      "sha256": "2d279e86d558fe6d155a49af699fd7be8867b42d5c89c803ee31df49ba2c1f0f",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openresolv-3.17.4-r0.apk",
-      "version": "3.17.4-r0"
-    },
-    {
       "apkIndexChecksum": "Q1GPvWxvOSv5J0EQfi4YdIeWwjGK8=",
       "aportsCommit": "a854c03acdac188901fb012f7acbee70a36e8041",
       "datahash": "663956f861094610beb718e1d542ee6a89c7f25c0b982082cf381ae749418a42",
@@ -465,45 +429,6 @@
       "sha256": "33b5515b34ed595b47e7843dcda8e780682b5a1a162a0a38f1dcaf6ab9528791",
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/tcpdump-4.99.6-r1.apk",
       "version": "4.99.6-r1"
-    },
-    {
-      "apkIndexChecksum": "Q1OurBn4gJX+znXLZYhirA/7Pc7OQ=",
-      "aportsCommit": "555c1f4b3dc44865eb35168a590e69f0c7a33e76",
-      "datahash": "d5f26a7febd70022de2629ba6c872dcd9b52511430c027c51ed37ef94727bc71",
-      "dependencies": [
-        "so:libc.musl-aarch64.so.1"
-      ],
-      "file": "wireguard-tools-wg-1.0.20260223-r0.apk",
-      "license": "GPL-2.0-only",
-      "name": "wireguard-tools-wg",
-      "origin": "wireguard-tools",
-      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
-      "repositoryName": "main",
-      "role": "runtime",
-      "sha256": "86c64a73399155847f410eecc1834e3b06ba9f8e01ecbf44e895409dfb773959",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/wireguard-tools-wg-1.0.20260223-r0.apk",
-      "version": "1.0.20260223-r0"
-    },
-    {
-      "apkIndexChecksum": "Q1CUrvu7rPj+vyPHFVsP6zAL8FgVQ=",
-      "aportsCommit": "555c1f4b3dc44865eb35168a590e69f0c7a33e76",
-      "datahash": "ed21c246a3d33307cfd75a8c83fa5ded52d50eadff6199866ce1011caba157a7",
-      "dependencies": [
-        "wireguard-tools-wg=1.0.20260223-r0",
-        "bash",
-        "cmd:resolvconf",
-        "iproute2"
-      ],
-      "file": "wireguard-tools-wg-quick-1.0.20260223-r0.apk",
-      "license": "GPL-2.0-only",
-      "name": "wireguard-tools-wg-quick",
-      "origin": "wireguard-tools",
-      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
-      "repositoryName": "main",
-      "role": "runtime",
-      "sha256": "5ca3e8ca7eef19053e575d636316edb4be1f2ffb7322664c502d30332dc264b7",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/wireguard-tools-wg-quick-1.0.20260223-r0.apk",
-      "version": "1.0.20260223-r0"
     },
     {
       "apkIndexChecksum": "Q1qeG8MrsxW/2sYiT5J4Xk2aM0vyk=",
@@ -546,7 +471,6 @@
     "busybox",
     "iproute2",
     "nftables",
-    "wireguard-tools-wg-quick",
     "tcpdump"
   ],
   "schemaVersion": 1,

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example alpine-3.24.1-r1
+        description: Release tag, for example vm-assets-v1-alpine-3.24.1-r1
         required: true
         type: string
 
@@ -24,6 +24,7 @@ jobs:
     timeout-minutes: 300
     env:
       RELEASE_TAG: ${{ inputs.tag }}
+      LEGACY_LATEST_TAG: alpine-3.24.1-r2
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -39,23 +40,48 @@ jobs:
         run: |
           release_commit=$(git rev-parse HEAD)
 
-          if [[ ! $RELEASE_TAG =~ ^alpine-[0-9]+\.[0-9]+\.[0-9]+-r[1-9][0-9]*$ ]]; then
-            echo "Release tag must match alpine-<major>.<minor>.<patch>-r<N>." >&2
+          current_latest_tag=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')
+          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
+            echo "Expected legacy Latest $LEGACY_LATEST_TAG, got $current_latest_tag." >&2
             exit 1
           fi
 
-          config_version=$(python3 - <<'PY'
+          read -r asset_version config_version < <(python3 - <<'PY'
+          import json
           from pathlib import Path
+
+          asset_version = json.loads(
+              Path("config/vm-assets.json").read_text()
+          ).get("assetVersion")
+          if isinstance(asset_version, bool) or not isinstance(asset_version, int) or asset_version < 1:
+              raise SystemExit("config/vm-assets.json must contain a positive integer assetVersion")
 
           for line in Path("config/alpine.env").read_text().splitlines():
               if line.startswith("ALPINE_VERSION="):
-                  print(line.split("=", 1)[1].strip().strip("'\""))
+                  alpine_version = line.split("=", 1)[1].strip().strip("'\"")
                   break
+          else:
+              raise SystemExit("config/alpine.env does not define ALPINE_VERSION")
+
+          print(asset_version, alpine_version)
           PY
           )
-          tag_version=${RELEASE_TAG#alpine-}
-          tag_version=${tag_version%-r*}
-          if [[ -z $config_version || $tag_version != "$config_version" ]]; then
+
+          if [[ $RELEASE_TAG =~ ^vm-assets-v([1-9][0-9]*)-alpine-([0-9]+\.[0-9]+\.[0-9]+)-r[1-9][0-9]*$ ]]; then
+            tag_asset_version=${BASH_REMATCH[1]}
+            tag_version=${BASH_REMATCH[2]}
+          else
+            echo "Release tag must match vm-assets-v<assetVersion>-alpine-<major>.<minor>.<patch>-r<N>." >&2
+            exit 1
+          fi
+
+          if [[ $tag_asset_version != "$asset_version" ]]; then
+            echo "Release tag asset version $tag_asset_version does not match config $asset_version." >&2
+            exit 1
+          fi
+          if [[ $tag_version != "$config_version" ]]; then
             echo "Release tag Alpine version $tag_version does not match config $config_version." >&2
             exit 1
           fi
@@ -93,6 +119,8 @@ jobs:
           else
             gh release create "$RELEASE_TAG" \
               --draft \
+              --prerelease=false \
+              --latest=false \
               --target "$release_commit" \
               --title "$RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
@@ -278,7 +306,26 @@ jobs:
             cmp "$release_dir/$asset" "$readback/$asset"
           done
 
-          gh release edit "$RELEASE_TAG" --draft=false
+          current_latest_tag=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')
+          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
+            echo "Expected legacy Latest $LEGACY_LATEST_TAG before publishing, got $current_latest_tag." >&2
+            exit 1
+          fi
+
+          gh release edit "$RELEASE_TAG" \
+            --draft=false \
+            --prerelease=false \
+            --latest=false
           gh release view "$RELEASE_TAG" \
-            --json isDraft \
-            --jq '.isDraft' | grep -Fx false
+            --json isDraft,isPrerelease \
+            --jq '.isDraft == false and .isPrerelease == false' | grep -Fx true
+
+          current_latest_tag=$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')
+          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
+            echo "Expected legacy Latest $LEGACY_LATEST_TAG after publishing, got $current_latest_tag." >&2
+            exit 1
+          fi

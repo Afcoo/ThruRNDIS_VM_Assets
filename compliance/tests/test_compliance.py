@@ -24,7 +24,16 @@ sys.path.insert(0, str(COMPLIANCE_DIR))
 
 import build_compliance  # noqa: E402
 import verify_compliance  # noqa: E402
-from common import ComplianceError, load_policy, normalize_license, sha256_file, write_json  # noqa: E402
+from common import (  # noqa: E402
+    CpioEntry,
+    ComplianceError,
+    check_initramfs_content,
+    load_policy,
+    load_vm_asset_config,
+    normalize_license,
+    sha256_file,
+    write_json,
+)
 from source_bundle import (  # noqa: E402
     ensure_commits,
     extract_licenses_from_tar,
@@ -70,6 +79,99 @@ class ComplianceTests(unittest.TestCase):
         policy = load_policy(self.policy_path)
         for package in lock["packages"]:
             normalize_license(package["license"], policy)
+
+    def test_current_asset_version_is_positive(self) -> None:
+        config = load_vm_asset_config(ROOT / "config/vm-assets.json")
+        self.assertEqual(config["assetVersion"], 1)
+
+    def test_asset_version_rejects_non_positive_integers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "vm-assets.json"
+            for value in (None, True, 0, -1, "1"):
+                path.write_text(json.dumps({"schemaVersion": 1, "assetVersion": value}))
+                with self.subTest(value=value), self.assertRaisesRegex(
+                    ComplianceError, "assetVersion must be a positive integer"
+                ):
+                    load_vm_asset_config(path)
+
+    def test_current_inputs_exclude_legacy_wireguard_payloads(self) -> None:
+        lock = json.loads((ROOT / "config/packages.lock.json").read_text())
+        names = {package["name"] for package in lock["packages"]}
+        self.assertFalse(any(name.startswith("wireguard") for name in names))
+        self.assertNotIn("wireguard-tools-wg-quick", lock["rootPackages"])
+
+        alpine_env = (ROOT / "config/alpine.env").read_text().lower()
+        self.assertNotIn("wireguard", alpine_env)
+        self.assertNotIn("virtiofs", alpine_env)
+
+        scripts = ROOT / "script/initramfs"
+        self.assertFalse((scripts / "init-virtiofs-wgconf").exists())
+        self.assertFalse((scripts / "wg0-usb0-gateway").exists())
+
+    def test_guest_vznat_and_fixed_host_link_contract(self) -> None:
+        scripts = ROOT / "script/initramfs"
+        init_network = (scripts / "init-network").read_text()
+        gateway = (scripts / "eth0-usb0-gateway").read_text()
+        for marker in (
+            "THRURNDIS_VZNAT_IPV4=",
+            "THRURNDIS_VZNAT_CIDR=",
+            "THRURNDIS_VZNAT_GATEWAY=",
+        ):
+            self.assertIn(marker, init_network)
+        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", init_network)
+        self.assertIn(
+            'ip -4 address replace "$HOST_LINK_GUEST_CIDR" dev "$iface"',
+            init_network,
+        )
+
+        self.assertIn("HOST_LINK_GUEST_IPV4=192.168.100.1", gateway)
+        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", gateway)
+        self.assertIn("HOST_LINK_HOST_IPV4=192.168.100.2", gateway)
+        self.assertIn("HOST_LINK_HOST_CIDR=192.168.100.2/32", gateway)
+        self.assertIn('THRURNDIS_RNDIS_IPV4=${1:-}', gateway)
+        self.assertIn('THRURNDIS_RNDIS_ROUTE_READY=$1', gateway)
+        gateway_up = gateway[gateway.index("gateway_up() {"):gateway.index("gateway_down() {")]
+        gateway_down = gateway[gateway.index("gateway_down() {"):gateway.index("gateway_status() {")]
+        self.assertLess(
+            gateway_up.index("announce_route_ready 0"),
+            gateway_up.index('announce_rndis_ipv4 ""'),
+        )
+        self.assertLess(
+            gateway_up.index("if ! gateway_status"),
+            gateway_up.index('announce_rndis_ipv4 "$rndis_ipv4"'),
+        )
+        self.assertLess(
+            gateway_up.index('announce_rndis_ipv4 "$rndis_ipv4"'),
+            gateway_up.index("announce_route_ready 1"),
+        )
+        self.assertLess(
+            gateway_down.index("announce_route_ready 0"),
+            gateway_down.index('announce_rndis_ipv4 ""'),
+        )
+        self.assertIn('from "$HOST_LINK_HOST_CIDR"', gateway)
+        self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
+        self.assertIn('ip saddr $HOST_LINK_HOST_CIDR', gateway)
+        self.assertIn('ip daddr $HOST_LINK_HOST_CIDR', gateway)
+        self.assertIn('ip daddr $HOST_LINK_GUEST_IPV4', gateway)
+        self.assertIn('iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE"', gateway)
+        self.assertIn('udp dport 53 dnat to $rndis_dns', gateway)
+        self.assertIn('tcp dport 53 dnat to $rndis_dns', gateway)
+        self.assertIn('THRURNDIS_RNDIS_RESOLV_CONF', gateway)
+        self.assertIn('$1 == "nameserver"', gateway)
+        self.assertNotIn(
+            'ingress_source=$(interface_default_gateway "$INGRESS_IFACE")',
+            gateway,
+        )
+        self.assertNotIn("ingress_destination=", gateway)
+
+    def test_legacy_wireguard_payload_fails_closed(self) -> None:
+        entry = CpioEntry(
+            "lib/modules/6.0-0-lts/kernel/drivers/net/wireguard/wireguard.ko.gz",
+            stat.S_IFREG | 0o644,
+            b"legacy module",
+        )
+        with self.assertRaisesRegex(ComplianceError, "runtime configuration leaked"):
+            check_initramfs_content([entry])
 
     def test_unknown_license_fails_closed(self) -> None:
         with self.assertRaisesRegex(ComplianceError, "unreviewed SPDX license"):
@@ -214,7 +316,7 @@ class ComplianceTests(unittest.TestCase):
                 )
             )
 
-            module_path = "lib/modules/6.0-0-lts/kernel/wireguard.ko.gz"
+            module_path = "lib/modules/6.0-0-lts/kernel/drivers/net/usb/rndis_host.ko.gz"
             init_files = {
                 "bin/busybox": (stat.S_IFREG | 0o755, b"busybox"),
                 "etc/init.d/rcS": (stat.S_IFREG | 0o755, b"#!/bin/sh\n"),
@@ -281,6 +383,8 @@ class ComplianceTests(unittest.TestCase):
             shutil.copyfile(ROOT / "LICENSES/GPL-2.0-or-later.txt", repo / "LICENSES/GPL-2.0-or-later.txt")
             (repo / "config").mkdir()
             (repo / "config/packages.lock.json").write_text(json.dumps(lock))
+            asset_config = {"schemaVersion": 1, "assetVersion": 1}
+            (repo / "config/vm-assets.json").write_text(json.dumps(asset_config))
             subprocess.run(["git", "init", "-q", repo], check=True)
             subprocess.run(["git", "-C", repo, "config", "user.name", "Test"], check=True)
             subprocess.run(["git", "-C", repo, "config", "user.email", "test@example.invalid"], check=True)
@@ -307,10 +411,31 @@ class ComplianceTests(unittest.TestCase):
                     asset_dir=assets,
                     archive=build / "release/vm_assets.zip",
                     source_bundle=None,
+                    repo=repo,
                 )
             )
+            manifest = json.loads((assets / "manifest.json").read_text())
+            self.assertEqual(manifest["assetVersion"], 1)
             self.assertTrue((assets / "compliance/sbom.spdx.json").is_file())
             self.assertTrue((build / "release/vm_assets.zip").is_file())
+
+            manifest_path = assets / "manifest.json"
+            original_manifest = manifest_path.read_text()
+            manifest["assetVersion"] = 2
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ComplianceError, "assetVersion differs from config"):
+                verify_compliance.run(
+                    SimpleNamespace(
+                        lock=lock_path,
+                        policy=self.policy_path,
+                        build_dir=build,
+                        asset_dir=assets,
+                        archive=build / "release/vm_assets.zip",
+                        source_bundle=None,
+                        repo=repo,
+                    )
+                )
+            manifest_path.write_text(original_manifest)
 
             if shutil.which("zstd") is None:
                 return
@@ -319,6 +444,7 @@ class ComplianceTests(unittest.TestCase):
             (source_root / "builder/config").mkdir(parents=True)
             shutil.copyfile(repo / "LICENSES/GPL-2.0-or-later.txt", source_root / "builder/LICENSES/GPL-2.0-or-later.txt")
             shutil.copyfile(repo / "config/packages.lock.json", source_root / "builder/config/packages.lock.json")
+            shutil.copyfile(repo / "config/vm-assets.json", source_root / "builder/config/vm-assets.json")
             (source_root / "packages").mkdir()
             shutil.copyfile(
                 provenance / "packages/busybox-1.0-r0.PKGINFO",
@@ -371,6 +497,7 @@ class ComplianceTests(unittest.TestCase):
                 source_root / "SOURCE_MANIFEST.json",
                 {
                     "schemaVersion": 1,
+                    "assetVersion": 1,
                     "created": "1970-01-01T00:00:00Z",
                     "builderCommit": commit,
                     "alpine": lock["alpine"],
@@ -390,6 +517,7 @@ class ComplianceTests(unittest.TestCase):
                     asset_dir=assets,
                     archive=build / "release/vm_assets.zip",
                     source_bundle=source_bundle,
+                    repo=repo,
                 )
             )
 

@@ -107,5 +107,69 @@ jobs:
       - name: Confirm build did not change tracked inputs
         run: git diff --exit-code
 
-      # Intentionally no upload-artifact step: CI verifies but does not
-      # distribute binaries. Only the manual release workflow publishes them.
+      - name: Prepare independently downloadable verification artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir=build/verification-artifact
+          install -d "$artifact_dir"
+          install -m 0644 \
+            build/release/vm_assets.zip \
+            build/release/vm_assets-sources.tar.zst \
+            build/assets/compliance/sbom.spdx.json \
+            build/assets/compliance/THIRD_PARTY_NOTICES.md \
+            "$artifact_dir/"
+
+          (
+            cd "$artifact_dir"
+            sha256sum \
+              vm_assets.zip \
+              vm_assets-sources.tar.zst \
+              sbom.spdx.json \
+              THIRD_PARTY_NOTICES.md \
+              > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+
+      # Raw single-file uploads keep each public filename as its artifact name.
+      - name: Upload corresponding-source archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/vm_assets-sources.tar.zst
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      - name: Upload SPDX SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      - name: Upload third-party notices
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      - name: Upload verification checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+          archive: false
+
+      # Upload the binary last so a failed companion upload cannot leave a
+      # binary-only verification artifact set behind.
+      - name: Upload VM assets binary archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: build/verification-artifact/vm_assets.zip
+          if-no-files-found: error
+          retention-days: 7
+          archive: false

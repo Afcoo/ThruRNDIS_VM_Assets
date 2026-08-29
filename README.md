@@ -180,7 +180,7 @@ control-contract changes. Alpine or APK refreshes, rebuilds, and additive
 backward-compatible metadata do not increment it. Consumers must treat a
 missing value as an unversioned legacy asset and accept only format versions
 they explicitly support. Versioned Release tags use the matching
-`vm-assets-v<assetVersion>-` namespace.
+`V<assetVersion>-` namespace.
 
 The build is intentionally lock-driven. It does not silently select newer
 packages. To propose an Alpine or APK refresh, run the **Update dependencies**
@@ -199,12 +199,16 @@ downloading the much larger corresponding-source archive. This temporary
 verification artifact set is not a GitHub Release and is not selected by the
 app's versioned Release-list installer.
 
-Releases are also manual. Run the **Release VM assets** workflow with a tag in
-the form `vm-assets-v1-alpine-3.24.1-r1`. The workflow requires the tag's VM
-asset version and Alpine version to match the checked-in configuration. It
-creates a draft release, uploads and reads back all five required assets,
-verifies their checksums, and publishes a formal, non-prerelease Release only
-after every check passes:
+Releases are also manual. Run the **Release VM assets** workflow without any
+inputs. It reads the VM asset and Alpine versions from the checked-in
+configuration and selects the tag automatically. The first Release for a
+version uses `r1`; later Releases use one more than the largest revision in
+that version's namespace. A failed run's latest draft is reused only when its
+tag and target both match the checked-out commit. Any malformed, orphaned, or
+otherwise ambiguous matching tag/Release state stops the workflow. The
+workflow creates a draft release, uploads and reads back all five required
+assets, verifies their checksums, and publishes a formal, non-prerelease
+Release only after every check passes:
 
 - `vm_assets.zip`
 - `vm_assets-sources.tar.zst`
@@ -216,7 +220,7 @@ Versioned VM asset Releases are published with `--latest=false`. The legacy
 `alpine-3.24.1-r2` Release remains GitHub Latest so ThruRNDIS v0.3.0 continues
 to resolve its unversioned assets through `/releases/latest`. New app versions
 list Releases and select only tags in their supported namespace, beginning
-with `vm-assets-v1-*`.
+with `V1-*`.
 
 GitHub's automatically generated repository archive is not corresponding
 source for the third-party binaries. Keep the source bundle and notices

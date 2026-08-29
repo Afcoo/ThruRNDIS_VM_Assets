@@ -143,9 +143,10 @@ alter the guest's main routing table.
 - Create Releases as drafts. Publish only after the binary, corresponding
   source, notices, SBOM, and checksums have all passed readback verification.
 - Versioned Release tags use
-  `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`, where both versions
-  match the checked-in configuration. Legacy `alpine-*` tags are a separate
-  namespace and never contribute to the versioned revision number.
+  `V<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`, where both versions
+  match the checked-in configuration. Legacy `alpine-*` and former
+  `vm-assets-v*` tags are separate namespaces and never contribute to the
+  versioned revision number.
 - Publish versioned artifacts as formal, non-prerelease Releases with
   `--latest=false`. Keep the legacy `alpine-3.24.1-r2` Release as GitHub Latest
   for ThruRNDIS v0.3.0 clients that still request `/releases/latest`.
@@ -215,15 +216,16 @@ alter the guest's main routing table.
    verified commit; if it moved, stop and verify the new commit before
    recalculating.
 2. List all GitHub Releases, including drafts, and repository tags matching
-   `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate
+   `V<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate
    revision numbers, a tag without its corresponding Release, a Release without
    its tag, or any malformed matching name. Separately require
    `/releases/latest` to resolve to the published, non-prerelease legacy
    `alpine-3.24.1-r2` Release.
-3. Choose the next tag deterministically:
+3. Calculate the expected next tag deterministically for review of the
+   workflow's automatic selection:
    - If no Release exists for this asset-version namespace and the merged
      `ALPINE_VERSION`, use
-     `vm-assets-v<assetVersion>-alpine-<ALPINE_VERSION>-r1`, even when legacy
+     `V<assetVersion>-alpine-<ALPINE_VERSION>-r1`, even when legacy
      tags or older Alpine versions have Releases.
    - If Releases already exist for the same Alpine version, use one greater
      than the largest revision in the same asset-version namespace:
@@ -232,10 +234,11 @@ alter the guest's main routing table.
      draft at the intended next tag and that draft targets the same verified
      commit, reuse that tag. Do not increment merely because the failed draft
      exists.
-4. Dispatch `Release VM assets` against the default branch with the chosen
-   `tag` input. Wait for the exact new run and require
-   `conclusion=success`. The workflow must check out the previously verified
-   commit; a moved target is blocking.
+4. Dispatch `Release VM assets` against the default branch without inputs.
+   Wait for the exact new run and require `conclusion=success`. Require its
+   automatically selected tag to equal the expected tag from the previous
+   step. The workflow must check out the previously verified commit; a moved
+   target is blocking.
 5. Confirm from the run that `Ensure draft Release at the checked-out commit`
    succeeded before any upload, and that `Upload, read back, and publish the
    draft` succeeded. This proves the workflow created/reused a draft, uploaded

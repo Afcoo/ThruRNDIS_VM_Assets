@@ -27,10 +27,11 @@ ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG = ROOT / "config/alpine.env"
 DEFAULT_LOCK = ROOT / "config/packages.lock.json"
 INITRAMFS_SCRIPTS = (
-    "rcS", "init-console", "init-rndis", "init-network", "usb0-watcher",
-    "eth0-usb0-gateway",
+    "rcS", "init-console", "init-rndis", "init-network", "init-mdns",
+    "usb0-watcher", "eth0-usb0-gateway",
 )
-INITRAMFS_SOURCED_MODULES = ("port-forwarding",)
+INITRAMFS_SOURCED_MODULES = ("port-forwarding", "mdns-advertising")
+AVAHI_CONFIG = SCRIPT_DIR / "avahi-daemon.conf"
 
 
 class GuestPathError(ValueError):
@@ -485,6 +486,7 @@ def write_inittab(root: pathlib.Path, owners: dict[str, str]) -> None:
     add_file(root, "etc/inittab", """::sysinit:/etc/init.d/rcS
 ::wait:/usr/local/sbin/init-rndis
 ::wait:/usr/local/sbin/init-network
+::respawn:/usr/local/sbin/init-mdns
 ::respawn:/usr/local/sbin/usb0-watcher
 hvc0::respawn:/usr/local/sbin/init-console
 ::restart:/sbin/init
@@ -503,6 +505,29 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         path.mkdir(parents=True, exist_ok=True)
         path.chmod(mode)
     add_symlink(root, "init", "/sbin/init", "project", owners)
+    # Alpine package maintainer scripts are intentionally never executed in
+    # this explicitly assembled initramfs. Reproduce Avahi's reviewed
+    # avahi.pre-install identity exactly, and make its compiled /var/run path
+    # resolve into the early-boot /run tmpfs.
+    add_file(
+        root,
+        "etc/passwd",
+        "root:x:0:0:root:/root:/bin/sh\n"
+        "avahi:x:86:86:Avahi System User:/dev/null:/sbin/nologin\n",
+        0o644,
+        "project",
+        owners,
+    )
+    add_file(
+        root,
+        "etc/group",
+        "root:x:0:\n"
+        "avahi:x:86:\n",
+        0o644,
+        "project",
+        owners,
+    )
+    add_symlink(root, "var/run", "/run", "project", owners)
     write_inittab(root, owners)
     for name in INITRAMFS_SCRIPTS:
         source = SCRIPT_DIR / "initramfs" / name
@@ -516,6 +541,34 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
             fail(f"Missing project initramfs module: {source}")
         destination = f"usr/local/libexec/thrurndis/{name}"
         add_file(root, destination, source.read_bytes(), 0o644, "project", owners)
+    if not AVAHI_CONFIG.is_file():
+        fail(f"Missing project Avahi configuration: {AVAHI_CONFIG}")
+    # The Alpine Avahi package ships example SSH/SFTP service records. This
+    # guest publishes only its address record and must not claim unavailable
+    # services, so retain an intentionally empty static-services directory.
+    avahi_services = root / "etc/avahi/services"
+    if avahi_services.exists() or avahi_services.is_symlink():
+        if avahi_services.is_dir() and not avahi_services.is_symlink():
+            shutil.rmtree(avahi_services)
+        else:
+            avahi_services.unlink()
+    avahi_services.mkdir(parents=True, mode=0o755)
+    add_file(
+        root,
+        "etc/avahi/avahi-daemon.conf",
+        AVAHI_CONFIG.read_bytes(),
+        0o644,
+        "project",
+        owners,
+    )
+    add_file(
+        root,
+        "etc/avahi/hosts",
+        "# Intentionally empty: thrurndis.local follows usb0 dynamically.\n",
+        0o644,
+        "project",
+        owners,
+    )
     add_file(root, "etc/resolv.conf", b"", 0o644, "project", owners)
 
 
@@ -699,7 +752,7 @@ def main() -> int:
             fail(f"Firmware payloads are forbidden in the initramfs: {forbidden_firmware}")
     required_commands = (
         "bin/sh", "usr/bin/busybox", "sbin/ip", "usr/sbin/nft",
-        "usr/bin/tcpdump",
+        "usr/bin/tcpdump", "usr/sbin/avahi-daemon",
     )
     for relative in required_commands:
         try:

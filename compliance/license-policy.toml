@@ -9,6 +9,8 @@ project_copyright = "Copyright (C) 2026 Afcoo"
 # dependency update which introduces a different license intentionally fails
 # until the policy and the generated notices are reviewed together.
 allowed_licenses = [
+  # Avahi links Alpine's dbus-libs, declared as AFL-2.1 OR GPL-2.0-or-later.
+  "AFL-2.1",
   "Apache-2.0",
   "BSD-2-Clause",
   "BSD-3-Clause",

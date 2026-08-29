@@ -58,6 +58,20 @@ includes them in its single owned `thrurndis` nftables transaction. DNAT
 changes only the destination address to `192.168.100.2`, preserving the
 original destination port. The value is immutable for that VM boot.
 
+BusyBox init continuously supervises a foreground Avahi process. Whenever
+`usb0` receives its RNDIS DHCP address, Avahi multicasts an IPv4 mDNS address
+record for `thrurndis.local`, whether or not a port-forwarding set is
+configured. When forwarding is configured, an RNDIS peer can therefore open a
+forwarded macOS service as
+`thrurndis.local:<port>` instead of tracking the DHCP-assigned guest address.
+The daemon is restricted to `usb0`, publishes neither DNS servers nor example
+SSH/SFTP services, and does not reflect mDNS to `eth0`. The nftables
+transaction exempts `224.0.0.251:5353/udp` before optional port DNAT, so
+forwarding port 5353 does not consume multicast name queries. Avahi follows
+RNDIS detach, reconnect, and address changes itself while remaining resident.
+Gateway readiness fails closed if it cannot claim exactly `thrurndis.local`,
+including when a collision would make it fall back to a suffixed name.
+
 The machine-readable console contract is line-oriented:
 
 ```text
@@ -84,9 +98,10 @@ included.
 
 `THRURNDIS_PORT_FORWARD_STATE=error:<code>` reports an invalid boot value or
 failed rule setup. Current codes are `invalid-state`, `nft-unavailable`,
-`nft-install`, and `rule-status`. `pending` means the boot configuration is
-valid but the RNDIS gateway is not ready; `active` is emitted only after the
-matching rules pass the guest's exact status checks.
+`nft-install`, `rule-status`, and `mdns-unready`. `pending` means the boot
+configuration is valid but the RNDIS gateway is not ready; `active` is emitted
+only after the matching rules and exact `thrurndis.local` Avahi advertisement
+pass the guest's status checks.
 
 ### Initramfs boot responsibilities
 
@@ -99,14 +114,17 @@ the initramfs; the macOS app does not execute them on the host.
 | `::sysinit` | `rcS` | Mount early filesystems, create device and console state, initialize `mdev`, load console and kernel-command-line modules, and prepare the RAM-backed shell environment. |
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
+| `::respawn` | `init-mdns` | `exec` Avahi in the foreground so BusyBox init exclusively supervises and restarts it; keep it resident across late `usb0` attachment, detach, and reconnect. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
 | sourced module | `port-forwarding` | Parse and validate the optional canonical port/range set from `/proc/cmdline`, prepare one shared TCP/UDP interval set plus rule fragments and marker state, and inspect exact installed state without mutating nftables. |
-| watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish the canonical RNDIS IPv4 plus readiness changes. |
+| sourced module | `mdns-advertising` | Without mutating process state, wait for and validate the init-supervised Avahi process, live `usb0` IPv4, exact `thrurndis.local` name, privilege drop, and IPv4 multicast membership. |
+| watcher helper | `eth0-usb0-gateway` | Source the port-forwarding and mDNS status modules, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, wait for the Avahi advertisement, and publish the canonical RNDIS IPv4 plus readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |
 
 The split is intentional: boot-time RNDIS module preparation must not depend on
-`usb0` already existing, while the respawned watcher must tolerate USB devices
-appearing late, disconnecting, or reconnecting during a VM session.
+`usb0` already existing, the respawned foreground Avahi process owns mDNS
+continuity, and the separate watcher must tolerate USB devices appearing late,
+disconnecting, or reconnecting during a VM session.
 
 ## License model
 

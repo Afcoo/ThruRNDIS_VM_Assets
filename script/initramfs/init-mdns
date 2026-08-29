@@ -1,0 +1,30 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+export PATH
+
+AVAHI_DAEMON=/usr/sbin/avahi-daemon
+AVAHI_CONFIG=/etc/avahi/avahi-daemon.conf
+
+log_console() {
+    echo "thrurndis-mdns-init: $*" >/dev/kmsg 2>/dev/null || true
+    if [ -c /dev/console ]; then
+        echo "thrurndis-mdns-init: $*" >/dev/console 2>/dev/null || true
+    else
+        echo "thrurndis-mdns-init: $*" >&2
+    fi
+}
+
+if [ ! -x "$AVAHI_DAEMON" ]; then
+    log_console "missing Avahi daemon $AVAHI_DAEMON"
+    exit 1
+fi
+if [ ! -r "$AVAHI_CONFIG" ]; then
+    log_console "missing Avahi configuration $AVAHI_CONFIG"
+    exit 1
+fi
+
+log_console "starting Avahi in foreground; BusyBox init owns restart policy"
+exec "$AVAHI_DAEMON" --file="$AVAHI_CONFIG"

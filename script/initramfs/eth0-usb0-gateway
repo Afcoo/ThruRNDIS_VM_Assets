@@ -21,6 +21,7 @@ HOST_LINK_GUEST_CIDR=192.168.100.1/24
 HOST_LINK_HOST_IPV4=192.168.100.2
 HOST_LINK_HOST_CIDR=192.168.100.2/32
 PORT_FORWARDING_MODULE=/usr/local/libexec/thrurndis/port-forwarding
+MDNS_ADVERTISING_MODULE=/usr/local/libexec/thrurndis/mdns-advertising
 
 log() {
     echo "thrurndis-gateway: $*" >/dev/kmsg 2>/dev/null || true
@@ -41,6 +42,12 @@ if [ ! -r "$PORT_FORWARDING_MODULE" ]; then
 fi
 # shellcheck source=/usr/local/libexec/thrurndis/port-forwarding
 . "$PORT_FORWARDING_MODULE"
+if [ ! -r "$MDNS_ADVERTISING_MODULE" ]; then
+    log_console "missing mDNS advertising module $MDNS_ADVERTISING_MODULE"
+    exit 1
+fi
+# shellcheck source=/usr/local/libexec/thrurndis/mdns-advertising
+. "$MDNS_ADVERTISING_MODULE"
 
 announce_route_ready() {
     log_console "THRURNDIS_RNDIS_ROUTE_READY=$1"
@@ -430,6 +437,7 @@ table ip $NFT_TABLE {
 
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
+        iifname "$RNDIS_IFACE" ip daddr 224.0.0.251 udp dport 5353 return
         $THRURNDIS_PF_PREROUTING_RULES
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 udp dport 53 dnat to $rndis_dns
         ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 tcp dport 53 dnat to $rndis_dns
@@ -523,6 +531,20 @@ gateway_up() {
         clear_gateway_state
         return 1
     fi
+    rndis_ipv4=$(interface_ipv4_address "$RNDIS_IFACE" || true)
+    if [ -z "$rndis_ipv4" ]; then
+        log_console "RNDIS interface $RNDIS_IFACE has no canonical IPv4 address after setup"
+        clear_gateway_state
+        return 1
+    fi
+    if ! thrurndis_mdns_wait_ready "$rndis_ipv4"; then
+        if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
+            thrurndis_pf_announce_error_state mdns-unready || true
+        fi
+        clear_gateway_state
+        return 1
+    fi
+
     if ! gateway_status >/tmp/thrurndis-gateway-status.err 2>&1; then
         if [ "$THRURNDIS_PF_ENABLED" -eq 1 ] \
             && ! thrurndis_pf_rules_ready >>/tmp/thrurndis-gateway-status.err 2>&1; then
@@ -530,13 +552,6 @@ gateway_up() {
         fi
         output=$($BB tail -n 8 /tmp/thrurndis-gateway-status.err 2>/dev/null | $BB tr '\n' ' ' || true)
         log_console "gateway status is incomplete after setup: ${output}"
-        clear_gateway_state
-        return 1
-    fi
-
-    rndis_ipv4=$(interface_ipv4_address "$RNDIS_IFACE" || true)
-    if [ -z "$rndis_ipv4" ]; then
-        log_console "RNDIS interface $RNDIS_IFACE has no canonical IPv4 address after setup"
         clear_gateway_state
         return 1
     fi
@@ -616,6 +631,14 @@ gateway_status() {
         echo "missing nft table ip $NFT_TABLE"
         missing=1
     else
+        if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
+            $BB grep -F "iifname \"$RNDIS_IFACE\"" |
+            $BB grep -F "ip daddr 224.0.0.251" |
+            $BB grep -F "udp dport 5353" |
+            $BB grep -F "return" >/dev/null 2>&1; then
+            echo "missing local mDNS exemption on $RNDIS_IFACE"
+            missing=1
+        fi
         if [ -n "$rndis_dns" ]; then
             if ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
                 $BB grep -F "ip saddr $HOST_LINK_HOST_IPV4" |
@@ -658,6 +681,13 @@ gateway_status() {
         if ! thrurndis_pf_rules_ready; then
             missing=1
         fi
+    fi
+
+    if ! thrurndis_pf_load_configuration; then
+        echo "invalid port forwarding boot configuration for mDNS advertising"
+        missing=1
+    elif ! thrurndis_mdns_status "$ipv4"; then
+        missing=1
     fi
 
     if [ "$missing" -eq 0 ]; then

@@ -62,6 +62,11 @@ they are not host-side setup scripts and are not run by the macOS app.
   identify the VM-created bridge; they are not the data-plane address. The host
   must not install its `/1` routes through `192.168.100.1` until the
   gateway-ready marker is also `1`.
+- `init-mdns` (`::respawn`) uses `exec` to run Avahi in the foreground. BusyBox
+  init is the sole process supervisor and restart owner for Avahi; the gateway
+  and its sourced modules must never daemonize, kill, or restart it. Avahi
+  remains resident when `usb0` is absent and follows interface appearance,
+  address changes, detach, and reconnect itself.
 - `usb0-watcher` (`::respawn`) watches the fixed RNDIS interface `usb0`, retries
   gateway setup when the interface appears or its state becomes incomplete,
   and clears stale gateway state when the interface disappears. It must remain
@@ -96,6 +101,21 @@ they are not host-side setup scripts and are not run by the macOS app.
   `pending:<ports>`, `active:<ports>`, or
   `error:<code>` on the system console. Changing the mapping requires a new VM
   boot.
+- Whenever `usb0` has its RNDIS DHCP address, independently of optional port
+  forwarding, Avahi publishes that address as the fixed link-local mDNS name
+  `thrurndis.local` on `usb0` only. The advertisement is IPv4-only, does not
+  reflect mDNS between interfaces, and must not publish example SSH/SFTP
+  services or DNS servers. Treat an Avahi failure, stale interface state,
+  daemon exit, or fallback collision name such as
+  `thrurndis-2.local` as incomplete gateway state; never report the gateway
+  ready under a name other than exactly `thrurndis.local`.
+- `mdns-advertising` is the gateway's side-effect-free Avahi status module. It
+  waits for and validates the init-supervised, privilege-dropped foreground
+  daemon, exact name, live address, and `usb0` multicast membership. It must
+  not mutate Avahi process state. The nftables prerouting chain must exempt
+  IPv4 mDNS multicast
+  `224.0.0.251:5353` before the optional UDP forwarding rule so forwarding port
+  5353 cannot capture name-resolution queries.
 - `eth0-usb0-gateway` remains the sole owner and mutator of the complete
   `thrurndis` nftables table. The sourced module must never invoke `nft` for
   mutation or install its rules in a separate transaction.
@@ -110,7 +130,8 @@ Keep the inittab wiring and these responsibility boundaries synchronized with
 the scripts. In particular, do not fold RNDIS module preparation into the
 runtime watcher and do not make the VZNAT one-shot wait for `usb0`. Keep the
 one-shot ahead of the watcher so `eth0` DHCP completes before `usb0` DHCP can
-alter the guest's main routing table.
+alter the guest's main routing table. Keep foreground Avahi under its own
+`::respawn` action rather than making the watcher or gateway its supervisor.
 
 ## Build and Provenance Rules
 

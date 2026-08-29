@@ -77,11 +77,22 @@ class PortForwardingTests(unittest.TestCase):
             "nft-unavailable",
             "nft-install",
             "rule-status",
+            "mdns-unready",
         ):
             self.assertIn(
                 f"thrurndis_pf_announce_error_state {code}",
                 gateway,
             )
+
+        prerouting = gateway[
+            gateway.index("chain prerouting {"):gateway.index("chain forward {")
+        ]
+        self.assertLess(
+            prerouting.index(
+                'iifname "$RNDIS_IFACE" ip daddr 224.0.0.251 udp dport 5353 return'
+            ),
+            prerouting.index("$THRURNDIS_PF_PREROUTING_RULES"),
+        )
 
     def test_boot_argument_parser_requires_canonical_port_set(self) -> None:
         probe = r'''

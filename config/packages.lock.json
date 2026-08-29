@@ -1,8 +1,8 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "c659e8534976b2e6b057d4e077b306081f81f4aa9aa99e2a2aae275750649c6e",
-      "main": "7a82800fe16260d4bf49b91c50d18bd7be13f00a0cc0cc3924d391b64e20640e"
+      "community": "6c505ccf4ac37761c125e95a12d6f848417a29ad92030efcda828a847a51ebc9",
+      "main": "b8d0b0d445daab4d8f5a009157278e2077e420cfa3cc819c04792c8e3f14201f"
     },
     "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
     "arch": "aarch64",
@@ -13,6 +13,51 @@
     "version": "3.24.1"
   },
   "packages": [
+    {
+      "apkIndexChecksum": "Q1x9TCJlt+aTR0PyQyJOPDsvSlErw=",
+      "aportsCommit": "c8147a84799898ff9780bc4f3c179ccc141e8e67",
+      "datahash": "25c4910a8c9ce3cd900b49ed27ecff1716359c2e520bbcc78ef40139c80d2dc1",
+      "dependencies": [
+        "/bin/sh",
+        "so:libavahi-common.so.3",
+        "so:libc.musl-aarch64.so.1",
+        "so:libcap.so.2",
+        "so:libdaemon.so.0",
+        "so:libdbus-1.so.3",
+        "so:libevent-2.1.so.7",
+        "so:libexpat.so.1"
+      ],
+      "file": "avahi-0.9_rc4-r0.apk",
+      "license": "LGPL-2.1-or-later",
+      "name": "avahi",
+      "origin": "avahi",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "804263c2a02a86c76a6d531051b33796fc1aec67c99e6c238e8535fefceaae51",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/avahi-0.9_rc4-r0.apk",
+      "version": "0.9_rc4-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1CfEVcyfHB4/0Xlde7OPTTya6RvY=",
+      "aportsCommit": "c8147a84799898ff9780bc4f3c179ccc141e8e67",
+      "datahash": "14e0a9cc7282b7774e685a2745a58905dee8b7397b2edac92c4283c9ad5a9ed5",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libdbus-1.so.3",
+        "so:libintl.so.8"
+      ],
+      "file": "avahi-libs-0.9_rc4-r0.apk",
+      "license": "LGPL-2.1-or-later",
+      "name": "avahi-libs",
+      "origin": "avahi",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "bf6c5092d9a90b2e5c22f007d888e8e786de73dcb9a787361d7a04afb8f8ecf6",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/avahi-libs-0.9_rc4-r0.apk",
+      "version": "0.9_rc4-r0"
+    },
     {
       "apkIndexChecksum": "Q1cc/8KYHy1Us5N8Jb4vUWmz+wRTI=",
       "aportsCommit": "c3ef5d10e6ef6528852c51f0564963e2f8c1be19",
@@ -48,6 +93,24 @@
       "sha256": "f3a1b2257cfa114ff20de05c665f380695385d589908bfc9af5768f39fef9ef5",
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/busybox-binsh-1.37.0-r31.apk",
       "version": "1.37.0-r31"
+    },
+    {
+      "apkIndexChecksum": "Q1ucyhfwYbDqS/uxc71BLdv8M7I8k=",
+      "aportsCommit": "0dac2d7bf76016e3bb78ccc734edbb157a1d4b51",
+      "datahash": "7007a82b2219e991800d1e07de74ad128d6f3884b209ca2c670d145a7b92fc7a",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "dbus-libs-1.16.2-r2.apk",
+      "license": "AFL-2.1 OR GPL-2.0-or-later",
+      "name": "dbus-libs",
+      "origin": "dbus",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "b09b297d622377f870da5f162563b2bb4926dda17dfb2c7b1c84c37b05e8e295",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/dbus-libs-1.16.2-r2.apk",
+      "version": "1.16.2-r2"
     },
     {
       "apkIndexChecksum": "Q1DJzr9ZbIpl8s1zSomENWF6MQREM=",
@@ -209,6 +272,24 @@
       "version": "3.5.8-r0"
     },
     {
+      "apkIndexChecksum": "Q1NQY6mXNP8lpqivliRSkog3mA/a4=",
+      "aportsCommit": "f8d62aa6b1bf91ade408013dde5995156561903c",
+      "datahash": "575e791a07dcb9fec1dc0dc1e360187c3d04922a59822ff7b348c75e2b441213",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libdaemon-0.14-r6.apk",
+      "license": "MIT",
+      "name": "libdaemon",
+      "origin": "libdaemon",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "82238e6a4cbaa16db0603537ef918e37beca17cc87537f3c85632b5ea47657ce",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libdaemon-0.14-r6.apk",
+      "version": "0.14-r6"
+    },
+    {
       "apkIndexChecksum": "Q1RCjq5C/BE4wYYYUjB33eFah9qj4=",
       "aportsCommit": "8f13294206888f3dd44ed74a8eb3dd9934499e81",
       "datahash": "e166e5221ce6189eec8a20187f8d62aec3487094e7ad4934372f89e820de481e",
@@ -227,6 +308,62 @@
       "sha256": "1c108314af454a885ac0b053201db57027470c4f2309412c016897e2a2bf5d0e",
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libelf-0.195-r0.apk",
       "version": "0.195-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1z+dnW98WAKlXZ7T70rkZncVR98k=",
+      "aportsCommit": "7c5a7049c5779d87b9b4fa1c7d416056f7e30298",
+      "datahash": "86c08b598139bea886dcca7e65699c38bab76e8ed348c9c6de020e9d3bdc511a",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1",
+        "so:libcrypto.so.3",
+        "so:libssl.so.3"
+      ],
+      "file": "libevent-2.1.13-r0.apk",
+      "license": "BSD-3-Clause",
+      "name": "libevent",
+      "origin": "libevent",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "7618eac5177ec3779fc2ed4ad4d533f5dfed2fc0aecf6c6274c9bf795f0e9991",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libevent-2.1.13-r0.apk",
+      "version": "2.1.13-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1z/aLNC1GTsH8UyUIQtl8a5FwwhA=",
+      "aportsCommit": "fd81f3f9f5558e4899e4bea15e317ef759acb6fb",
+      "datahash": "44b93dcab14005781f253b127e1e5637843efbdeb665fa837c5fbc2bd9858c89",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libexpat-2.8.3-r0.apk",
+      "license": "MIT",
+      "name": "libexpat",
+      "origin": "expat",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "22b636ba70503226bbea0ab8354aea4f227f574b6a60475c0ccba765807a5046",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libexpat-2.8.3-r0.apk",
+      "version": "2.8.3-r0"
+    },
+    {
+      "apkIndexChecksum": "Q1BIfqVgHJRKhMQ+eM1LTUYlY24q8=",
+      "aportsCommit": "a0b12dbf67fb047e79a1b76c6dfe6f2904d0d391",
+      "datahash": "f56435299d391e0f5973a57a97c7fad3232002aaa0f133045035b76d925be8ab",
+      "dependencies": [
+        "so:libc.musl-aarch64.so.1"
+      ],
+      "file": "libintl-1.0-r0.apk",
+      "license": "LGPL-2.1-or-later",
+      "name": "libintl",
+      "origin": "gettext",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "d106a13e3e68103d3a8217406aae6186289baf352d0f3d10fc21938d2dd8adb1",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libintl-1.0-r0.apk",
+      "version": "1.0-r0"
     },
     {
       "apkIndexChecksum": "Q1hEKvOZvv8fBWUp+l57eRAPiG1T4=",
@@ -301,6 +438,26 @@
       "sha256": "b204a41347820f3ba005a884ab9ce9698fc05da42889ad94d9f4ab355c45717b",
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libpcap-1.10.6-r1.apk",
       "version": "1.10.6-r1"
+    },
+    {
+      "apkIndexChecksum": "Q1PH/y0GXoooWZHJVNhDry3HE8zVk=",
+      "aportsCommit": "013edf8b29199933e8ea34dde460b5584b979042",
+      "datahash": "1a2922a2f168e4256927a717e7098a79cf5eb4ba5b93dfc58b810e2c289c6622",
+      "dependencies": [
+        "libcrypto3=3.5.8-r0",
+        "so:libc.musl-aarch64.so.1",
+        "so:libcrypto.so.3"
+      ],
+      "file": "libssl3-3.5.8-r0.apk",
+      "license": "Apache-2.0",
+      "name": "libssl3",
+      "origin": "openssl",
+      "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
+      "repositoryName": "main",
+      "role": "runtime",
+      "sha256": "d6ec970cc10e01539e41626f720c4e0ac69016eaa2079a10ef776ffd3243db5b",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libssl3-3.5.8-r0.apk",
+      "version": "3.5.8-r0"
     },
     {
       "apkIndexChecksum": "Q16bRNkqc+NZI1wx+jQCnzNalwuLk=",
@@ -468,6 +625,7 @@
     }
   ],
   "rootPackages": [
+    "avahi",
     "busybox",
     "iproute2",
     "nftables",

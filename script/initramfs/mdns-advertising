@@ -1,0 +1,170 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+# shellcheck shell=sh disable=SC2034
+
+# This side-effect-free status module is sourced by eth0-usb0-gateway after the
+# port-forwarding module. BusyBox init exclusively owns the foreground Avahi
+# process through init-mdns. This module requires that gateway's BB,
+# RNDIS_IFACE, interface_ipv4_address, and log_console.
+
+THRURNDIS_MDNS_HOST_NAME=thrurndis
+THRURNDIS_MDNS_FQDN=thrurndis.local
+THRURNDIS_MDNS_UID=86
+THRURNDIS_MDNS_GID=86
+THRURNDIS_MDNS_AVAHI_DAEMON=${THRURNDIS_MDNS_AVAHI_DAEMON:-/usr/sbin/avahi-daemon}
+THRURNDIS_MDNS_CONFIG=${THRURNDIS_MDNS_CONFIG:-/etc/avahi/avahi-daemon.conf}
+THRURNDIS_MDNS_PID_FILE=${THRURNDIS_MDNS_PID_FILE:-/run/avahi-daemon/pid}
+THRURNDIS_MDNS_PROC_ROOT=${THRURNDIS_MDNS_PROC_ROOT:-/proc}
+THRURNDIS_MDNS_READY_ATTEMPTS=${THRURNDIS_MDNS_READY_ATTEMPTS:-6}
+THRURNDIS_MDNS_READY_INTERVAL_SECONDS=${THRURNDIS_MDNS_READY_INTERVAL_SECONDS:-1}
+
+thrurndis_mdns_pid() {
+    [ -r "$THRURNDIS_MDNS_PID_FILE" ] || return 1
+    thrurndis_mdns_pid_value=$($BB cat "$THRURNDIS_MDNS_PID_FILE" 2>/dev/null) || return 1
+    case "$thrurndis_mdns_pid_value" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$thrurndis_mdns_pid_value" -gt 1 ] 2>/dev/null || return 1
+    printf '%s' "$thrurndis_mdns_pid_value"
+}
+
+thrurndis_mdns_pid_is_avahi() {
+    thrurndis_mdns_expected_pid=$1
+    [ -n "$thrurndis_mdns_expected_pid" ] || return 1
+    thrurndis_mdns_running_executable=$(
+        $BB readlink "$THRURNDIS_MDNS_PROC_ROOT/$thrurndis_mdns_expected_pid/exe" \
+            2>/dev/null
+    ) || return 1
+    [ "$thrurndis_mdns_running_executable" = "$THRURNDIS_MDNS_AVAHI_DAEMON" ]
+}
+
+thrurndis_mdns_pid_has_unprivileged_identity() {
+    thrurndis_mdns_identity_pid=$1
+    thrurndis_mdns_status_path="$THRURNDIS_MDNS_PROC_ROOT/$thrurndis_mdns_identity_pid/status"
+    [ -r "$thrurndis_mdns_status_path" ] || return 1
+    $BB awk -v expected_uid="$THRURNDIS_MDNS_UID" \
+        -v expected_gid="$THRURNDIS_MDNS_GID" '
+        $1 == "Uid:" {
+            uid_matches = $2 == expected_uid \
+                && $3 == expected_uid \
+                && $4 == expected_uid \
+                && $5 == expected_uid
+        }
+        $1 == "Gid:" {
+            gid_matches = $2 == expected_gid \
+                && $3 == expected_gid \
+                && $4 == expected_gid \
+                && $5 == expected_gid
+        }
+        $1 == "PPid:" {
+            parent_matches = $2 == 1
+        }
+        END { exit(uid_matches && gid_matches && parent_matches ? 0 : 1) }
+    ' "$thrurndis_mdns_status_path"
+}
+
+thrurndis_mdns_process_title() {
+    thrurndis_mdns_title_pid=$1
+    [ -r "$THRURNDIS_MDNS_PROC_ROOT/$thrurndis_mdns_title_pid/cmdline" ] || return 1
+    $BB tr '\000' ' ' <"$THRURNDIS_MDNS_PROC_ROOT/$thrurndis_mdns_title_pid/cmdline"
+}
+
+thrurndis_mdns_has_ipv4_membership() {
+    thrurndis_mdns_membership_pid=$1
+    thrurndis_mdns_igmp_path="$THRURNDIS_MDNS_PROC_ROOT/$thrurndis_mdns_membership_pid/net/igmp"
+    [ -r "$thrurndis_mdns_igmp_path" ] || return 1
+    $BB awk -v expected_interface="$RNDIS_IFACE" '
+        $1 ~ /^[0-9]+$/ && $3 == ":" {
+            current_interface = $2
+            next
+        }
+        current_interface == expected_interface \
+            && ($1 == "FB0000E0" || $1 == "E00000FB") {
+            found = 1
+        }
+        END { exit(found ? 0 : 1) }
+    ' "$thrurndis_mdns_igmp_path"
+}
+
+thrurndis_mdns_config_ready() {
+    [ -r "$THRURNDIS_MDNS_CONFIG" ] || return 1
+    for thrurndis_mdns_config_line in \
+        "host-name=$THRURNDIS_MDNS_HOST_NAME" \
+        "domain-name=local" \
+        "use-ipv4=yes" \
+        "use-ipv6=no" \
+        "allow-interfaces=$RNDIS_IFACE" \
+        "enable-dbus=no" \
+        "publish-addresses=yes" \
+        "publish-workstation=no" \
+        "publish-resolv-conf-dns-servers=no"; do
+        $BB grep -F -x "$thrurndis_mdns_config_line" "$THRURNDIS_MDNS_CONFIG" \
+            >/dev/null 2>&1 || return 1
+    done
+}
+
+thrurndis_mdns_status() {
+    thrurndis_mdns_expected_ipv4=${1:-}
+
+    [ -n "$thrurndis_mdns_expected_ipv4" ] || {
+        echo "missing RNDIS IPv4 for $THRURNDIS_MDNS_FQDN"
+        return 1
+    }
+    thrurndis_mdns_live_ipv4=$(interface_ipv4_address "$RNDIS_IFACE" || true)
+    if [ "$thrurndis_mdns_live_ipv4" != "$thrurndis_mdns_expected_ipv4" ]; then
+        echo "$RNDIS_IFACE IPv4 changed while advertising $THRURNDIS_MDNS_FQDN"
+        return 1
+    fi
+    if ! thrurndis_mdns_config_ready; then
+        echo "Avahi configuration does not restrict $THRURNDIS_MDNS_FQDN to $RNDIS_IFACE IPv4"
+        return 1
+    fi
+
+    thrurndis_mdns_status_pid=$(thrurndis_mdns_pid || true)
+    if [ -z "$thrurndis_mdns_status_pid" ] \
+        || ! thrurndis_mdns_pid_is_avahi "$thrurndis_mdns_status_pid"; then
+        echo "Avahi is not running from $THRURNDIS_MDNS_AVAHI_DAEMON"
+        return 1
+    fi
+    if ! thrurndis_mdns_pid_has_unprivileged_identity "$thrurndis_mdns_status_pid"; then
+        echo "Avahi is not an init-supervised UID/GID $THRURNDIS_MDNS_UID process"
+        return 1
+    fi
+    if ! "$THRURNDIS_MDNS_AVAHI_DAEMON" --check >/dev/null 2>&1; then
+        echo "Avahi does not report a running daemon"
+        return 1
+    fi
+    thrurndis_mdns_status_title=$(
+        thrurndis_mdns_process_title "$thrurndis_mdns_status_pid" || true
+    )
+    case "$thrurndis_mdns_status_title" in
+        *"avahi-daemon: running [$THRURNDIS_MDNS_FQDN]"*) ;;
+        *)
+            echo "Avahi has not claimed the exact host name $THRURNDIS_MDNS_FQDN"
+            return 1
+            ;;
+    esac
+    if ! thrurndis_mdns_has_ipv4_membership "$thrurndis_mdns_status_pid"; then
+        echo "Avahi has not joined 224.0.0.251 on $RNDIS_IFACE"
+        return 1
+    fi
+
+    return 0
+}
+
+thrurndis_mdns_wait_ready() {
+    thrurndis_mdns_wait_ipv4=$1
+    thrurndis_mdns_wait_attempt=0
+    while [ "$thrurndis_mdns_wait_attempt" -lt "$THRURNDIS_MDNS_READY_ATTEMPTS" ]; do
+        if thrurndis_mdns_status "$thrurndis_mdns_wait_ipv4" >/dev/null 2>&1; then
+            log_console "Avahi advertising $THRURNDIS_MDNS_FQDN=$thrurndis_mdns_wait_ipv4 on $RNDIS_IFACE"
+            return 0
+        fi
+        $BB sleep "$THRURNDIS_MDNS_READY_INTERVAL_SECONDS"
+        thrurndis_mdns_wait_attempt=$((thrurndis_mdns_wait_attempt + 1))
+    done
+
+    log_console "init-supervised Avahi is not ready as $THRURNDIS_MDNS_FQDN on $RNDIS_IFACE"
+    return 1
+}

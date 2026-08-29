@@ -41,7 +41,7 @@ from common import (
 )
 
 
-APORTS_URL = "https://gitlab.alpinelinux.org/alpine/aports.git"
+APORTS_URL = "https://github.com/alpinelinux/aports.git"
 MAX_LICENSE_FILE = 8 * 1024 * 1024
 MAX_LICENSE_TOTAL = 64 * 1024 * 1024
 MAX_LICENSE_COUNT = 10000

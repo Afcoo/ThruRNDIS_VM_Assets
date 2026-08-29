@@ -242,7 +242,7 @@ def latest_standard(env: dict[str, str]) -> dict[str, str]:
 def resolve_aports_tag(version: str) -> str:
     command = [
         "git", "ls-remote", "--tags",
-        "https://gitlab.alpinelinux.org/alpine/aports.git",
+        "https://github.com/alpinelinux/aports.git",
         f"refs/tags/v{version}^{{}}",
     ]
     result = subprocess.run(command, check=True, text=True, capture_output=True)

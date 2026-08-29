@@ -1,8 +1,8 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "9d7e6698a11a5e7b1aaad4f8656cc03b1ccfda7de8f23944beefe744b030624b",
-      "main": "b36a31b80b5347605513eb7790d863b32cebe873604072be33e268e98ca99ca1"
+      "community": "c659e8534976b2e6b057d4e077b306081f81f4aa9aa99e2a2aae275750649c6e",
+      "main": "7a82800fe16260d4bf49b91c50d18bd7be13f00a0cc0cc3924d391b64e20640e"
     },
     "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
     "arch": "aarch64",
@@ -191,22 +191,22 @@
       "version": "2.78-r0"
     },
     {
-      "apkIndexChecksum": "Q1B+W/WsLe+RZ3uvymoYtsJR6A9To=",
-      "aportsCommit": "4a4352d83ab03720965454a8c7b30b1b6a996c84",
-      "datahash": "f4f97bd34105d01bb967334589b252613a434e82b5c57e90b3ea0dd1ab97945d",
+      "apkIndexChecksum": "Q1yBbnEKxht37PmWjI99NQMTTPTe0=",
+      "aportsCommit": "013edf8b29199933e8ea34dde460b5584b979042",
+      "datahash": "000bcacec6f69b40986ae86773ffa78555d343a0cda17b7303c1d6e0c15271e8",
       "dependencies": [
         "so:libc.musl-aarch64.so.1"
       ],
-      "file": "libcrypto3-3.5.7-r0.apk",
+      "file": "libcrypto3-3.5.8-r0.apk",
       "license": "Apache-2.0",
       "name": "libcrypto3",
       "origin": "openssl",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "runtime",
-      "sha256": "936ce77a0f5621c9ebc91395d01c62d1127b13e6981d5eb55cdcae7a389540d0",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.7-r0.apk",
-      "version": "3.5.7-r0"
+      "sha256": "35b892813c23664a3592e4fc8c12a03538a22c579057655361c7043305272a9a",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.8-r0.apk",
+      "version": "3.5.8-r0"
     },
     {
       "apkIndexChecksum": "Q1RCjq5C/BE4wYYYUjB33eFah9qj4=",

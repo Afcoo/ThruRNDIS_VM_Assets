@@ -115,7 +115,8 @@ interface_ipv4_cidr() {
 
 canonical_ipv4() {
     value=$1
-    $BB awk -v value="$value" 'BEGIN {
+    printf '%s\n' "$value" | "$BB" awk 'NR == 1 {
+        value = $0
         if (value !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
             exit 1
         }
@@ -128,7 +129,45 @@ canonical_ipv4() {
             }
         }
         print value
+        next
+    }
+    { exit 1 }'
+}
+
+usable_unicast_ipv4() {
+    value=$(canonical_ipv4 "$1") || return 1
+    "$BB" awk -v value="$value" 'BEGIN {
+        split(value, octets, /\./)
+        if (octets[1] == 0 || octets[1] == 127 || octets[1] >= 224) {
+            exit 1
+        }
+        print value
     }'
+}
+
+ipv4_route_is_unicast() {
+    expected_ipv4=$1
+    expected_iface=${2:-}
+
+    "$BB" awk -v expected_ipv4="$expected_ipv4" \
+        -v expected_iface="$expected_iface" '
+        NR == 1 {
+            destination_matches = $1 == expected_ipv4
+            interface_matches = expected_iface == ""
+            route_is_usable = 1
+            for (i = 1; i <= NF; i++) {
+                if ($i == "dev" && i < NF && $(i + 1) == expected_iface) {
+                    interface_matches = 1
+                }
+                if ($i == "linkdown" || $i == "dead") {
+                    route_is_usable = 0
+                }
+            }
+        }
+        END {
+            exit(destination_matches && interface_matches && route_is_usable ? 0 : 1)
+        }
+    '
 }
 
 interface_ipv4_address() {
@@ -136,6 +175,12 @@ interface_ipv4_address() {
     cidr=$(interface_ipv4_cidr "$iface")
     [ -n "$cidr" ] || return 1
     canonical_ipv4 "${cidr%%/*}"
+}
+
+interface_has_carrier() {
+    iface=$1
+    carrier=$("$BB" cat "/sys/class/net/$iface/carrier" 2>/dev/null || true)
+    [ "$carrier" = 1 ]
 }
 
 interface_has_ipv4_cidr() {
@@ -165,10 +210,38 @@ interface_default_gateway() {
 
 rndis_dns_server() {
     [ -f "$RNDIS_RESOLV_CONF" ] || return 1
-    server=$($BB awk '$1 == "nameserver" { print $2; exit }' "$RNDIS_RESOLV_CONF")
-    [ -n "$server" ] || return 1
-    ip -4 route get "$server" >/dev/null 2>&1 || return 1
-    printf '%s' "$server"
+    interface_has_carrier "$RNDIS_IFACE" || return 1
+    rndis_source=$(interface_ipv4_address "$RNDIS_IFACE" || true)
+    [ -n "$rndis_source" ] || return 1
+
+    while IFS= read -r resolver_line || [ -n "$resolver_line" ]; do
+        server=$(printf '%s\n' "$resolver_line" |
+            "$BB" awk '$1 == "nameserver" { print $2; exit }')
+        [ -n "$server" ] || continue
+        server=$(usable_unicast_ipv4 "$server" || true)
+        [ -n "$server" ] || continue
+
+        main_route=$(ip -4 route get "$server" 2>/dev/null) || continue
+        if ! printf '%s\n' "$main_route" |
+            ipv4_route_is_unicast "$server"; then
+            continue
+        fi
+
+        rndis_route=$(
+            ip -4 route get "$server" from "$rndis_source" \
+                oif "$RNDIS_IFACE" 2>/dev/null
+        ) || continue
+        if ! printf '%s\n' "$rndis_route" |
+            ipv4_route_is_unicast "$server" "$RNDIS_IFACE"; then
+            continue
+        fi
+        interface_has_carrier "$RNDIS_IFACE" || continue
+
+        printf '%s' "$server"
+        return 0
+    done <"$RNDIS_RESOLV_CONF"
+
+    return 1
 }
 
 configure_rndis_ipv4() {

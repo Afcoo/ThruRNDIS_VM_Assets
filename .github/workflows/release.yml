@@ -5,11 +5,6 @@ name: Release VM assets
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag, for example vm-assets-v1-alpine-3.24.1-r1
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -23,7 +18,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
       LEGACY_LATEST_TAG: alpine-3.24.1-r2
       GH_TOKEN: ${{ github.token }}
 
@@ -35,9 +29,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate release tag
+      - name: Select and validate release tag
         shell: bash
         run: |
+          set -euo pipefail
           release_commit=$(git rev-parse HEAD)
 
           current_latest_tag=$(gh api \
@@ -48,53 +43,23 @@ jobs:
             exit 1
           fi
 
-          read -r asset_version config_version < <(python3 - <<'PY'
-          import json
-          from pathlib import Path
+          releases_json="$RUNNER_TEMP/releases.json"
+          tags_json="$RUNNER_TEMP/tags.json"
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq --slurp 'add // []' > "$releases_json"
+          gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/tags?per_page=100" \
+            | jq --slurp 'add // []' > "$tags_json"
 
-          asset_version = json.loads(
-              Path("config/vm-assets.json").read_text()
-          ).get("assetVersion")
-          if isinstance(asset_version, bool) or not isinstance(asset_version, int) or asset_version < 1:
-              raise SystemExit("config/vm-assets.json must contain a positive integer assetVersion")
-
-          for line in Path("config/alpine.env").read_text().splitlines():
-              if line.startswith("ALPINE_VERSION="):
-                  alpine_version = line.split("=", 1)[1].strip().strip("'\"")
-                  break
-          else:
-              raise SystemExit("config/alpine.env does not define ALPINE_VERSION")
-
-          print(asset_version, alpine_version)
-          PY
-          )
-
-          if [[ $RELEASE_TAG =~ ^vm-assets-v([1-9][0-9]*)-alpine-([0-9]+\.[0-9]+\.[0-9]+)-r[1-9][0-9]*$ ]]; then
-            tag_asset_version=${BASH_REMATCH[1]}
-            tag_version=${BASH_REMATCH[2]}
-          else
-            echo "Release tag must match vm-assets-v<assetVersion>-alpine-<major>.<minor>.<patch>-r<N>." >&2
-            exit 1
-          fi
-
-          if [[ $tag_asset_version != "$asset_version" ]]; then
-            echo "Release tag asset version $tag_asset_version does not match config $asset_version." >&2
-            exit 1
-          fi
-          if [[ $tag_version != "$config_version" ]]; then
-            echo "Release tag Alpine version $tag_version does not match config $config_version." >&2
-            exit 1
-          fi
-
-          printf 'VM_ASSET_VERSION=%s\n' "$asset_version" >> "$GITHUB_ENV"
-
-          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
-            tag_commit=$(git rev-list -n 1 "$RELEASE_TAG")
-            if [[ $tag_commit != "$release_commit" ]]; then
-              echo "Existing tag points to $tag_commit, not $release_commit." >&2
-              exit 1
-            fi
-          fi
+          selection=$(python3 script/select_release_tag.py \
+            --asset-config config/vm-assets.json \
+            --alpine-config config/alpine.env \
+            --release-commit "$release_commit" \
+            --releases-json "$releases_json" \
+            --tags-json "$tags_json")
+          printf '%s\n' "$selection"
+          printf '%s\n' "$selection" >> "$GITHUB_ENV"
 
       - name: Ensure draft Release at the checked-out commit
         shell: bash
@@ -130,6 +95,28 @@ jobs:
               --target "$release_commit" \
               --title "$RELEASE_TAG" \
               --notes-file "$RUNNER_TEMP/release-notes.md"
+
+            # Draft Releases can remain untagged until publication. Create the
+            # lightweight tag now so a failed run leaves an unambiguous,
+            # retryable draft-and-tag pair.
+            if ! gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
+              --silent 2>/dev/null
+            then
+              gh api --method POST \
+                "repos/$GITHUB_REPOSITORY/git/refs" \
+                --raw-field "ref=refs/tags/$RELEASE_TAG" \
+                --raw-field "sha=$release_commit" \
+                --silent
+            fi
+          fi
+
+          tag_commit=$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" \
+            --jq '.sha')
+          if [[ $tag_commit != "$release_commit" ]]; then
+            echo "Release tag points to $tag_commit, not $release_commit." >&2
+            exit 1
           fi
 
           expected_notes=$(<"$RUNNER_TEMP/release-notes.md")

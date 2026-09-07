@@ -1,8 +1,8 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "c659e8534976b2e6b057d4e077b306081f81f4aa9aa99e2a2aae275750649c6e",
-      "main": "7a82800fe16260d4bf49b91c50d18bd7be13f00a0cc0cc3924d391b64e20640e"
+      "community": "f53f026681f4669229100fb8c9287d425d20080b66f89bf02ecb68a1f21e67b5",
+      "main": "c6fa4452563a7ab7cfa66cbd0b225e7890708827f9bafbe638feed35e602f41b"
     },
     "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
     "arch": "aarch64",
@@ -285,22 +285,22 @@
       "version": "1.3.1-r0"
     },
     {
-      "apkIndexChecksum": "Q16g4la41Cg3iCWcNsWjUCU5S13Mo=",
-      "aportsCommit": "a9e2a2dc46f377eb25884f7fea9834492de7f518",
-      "datahash": "72ac51f8ff077f8c477e77c148d4653f0c9df34d155d0d2bff6fbca576908cf1",
+      "apkIndexChecksum": "Q1xxqE7ehXRpq88TUaUZ1hEbTlV0Y=",
+      "aportsCommit": "b58486db94a96a4f4eec23d28d4c1fbff9133b92",
+      "datahash": "0364edf680b022faef25968c827bfb18461fbab35e5d7bc68471b847bc8b9123",
       "dependencies": [
         "so:libc.musl-aarch64.so.1"
       ],
-      "file": "libpcap-1.10.6-r1.apk",
+      "file": "libpcap-1.10.7-r0.apk",
       "license": "BSD-3-Clause",
       "name": "libpcap",
       "origin": "libpcap",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "runtime",
-      "sha256": "b204a41347820f3ba005a884ab9ce9698fc05da42889ad94d9f4ab355c45717b",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libpcap-1.10.6-r1.apk",
-      "version": "1.10.6-r1"
+      "sha256": "e0bcd33b4cf451476abbf0b61725ab0a4b61465a5bd427c7e7cb4bdadf65cee2",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libpcap-1.10.7-r0.apk",
+      "version": "1.10.7-r0"
     },
     {
       "apkIndexChecksum": "Q16bRNkqc+NZI1wx+jQCnzNalwuLk=",

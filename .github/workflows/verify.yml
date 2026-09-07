@@ -104,6 +104,19 @@ jobs:
 
           grep -Fq "thrurndis-rcS: early boot setup finished" build/qemu-smoke.log
 
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          lock = json.loads(Path("config/packages.lock.json").read_text())
+          kernel = next(package for package in lock["packages"] if package.get("role") == "kernel")
+          release = kernel["version"].replace("-r", "-") + "-lts"
+          log = Path("build/qemu-smoke.log").read_text(errors="replace")
+          if f"Linux version {release} " not in log:
+              raise SystemExit(f"QEMU did not boot the locked kernel {release}")
+          print(f"Verified booted kernel: {release}")
+          PY
+
       - name: Confirm build did not change tracked inputs
         run: git diff --exit-code
 

@@ -22,6 +22,8 @@ COMPLIANCE_DIR = Path(__file__).resolve().parents[1]
 ROOT = COMPLIANCE_DIR.parent
 sys.path.insert(0, str(COMPLIANCE_DIR))
 
+from apk_fixture import make_apk  # noqa: E402
+
 import build_compliance  # noqa: E402
 import verify_compliance  # noqa: E402
 from common import (  # noqa: E402
@@ -239,6 +241,12 @@ class ComplianceTests(unittest.TestCase):
         self.assertEqual(checked.call_count, 2)
 
     def test_binary_compliance_end_to_end(self) -> None:
+        self.check_binary_compliance_end_to_end(apk_kernel=False)
+
+    def test_kernel_apk_compliance_end_to_end(self) -> None:
+        self.check_binary_compliance_end_to_end(apk_kernel=True)
+
+    def check_binary_compliance_end_to_end(self, apk_kernel: bool) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             temp = Path(temporary)
             repo = temp / "repo"
@@ -285,6 +293,19 @@ class ComplianceTests(unittest.TestCase):
                 "dependencies": [],
                 "role": "kernel",
             }
+            vmlinuz = gzip.compress(b"Linux Image", mtime=0)
+            if apk_kernel:
+                payload, kernel_pkginfo, checksum = make_apk({
+                    "boot/vmlinuz-lts": vmlinuz,
+                    "lib/modules/6.0-0-lts/kernel/drivers/net/usb/rndis_host.ko.gz": gzip.compress(b"kernel module", mtime=0),
+                }, version="6.0-r0", commit=kernel_commit)
+                kernel.update(file="linux-lts-6.0-r0.apk", repository=runtime["repository"],
+                              url=runtime["repository"] + "/linux-lts-6.0-r0.apk",
+                              sha256=sha256(payload), apkIndexChecksum=checksum,
+                              datahash=next(line.split(" = ")[1] for line in kernel_pkginfo.splitlines()
+                                            if line.startswith("datahash = ")))
+                (apk_dir / kernel["file"]).write_bytes(payload)
+                (provenance / "packages/linux-lts-6.0-r0.PKGINFO").write_text(kernel_pkginfo)
             lock = {
                 "schemaVersion": 1,
                 "alpine": {
@@ -317,6 +338,8 @@ class ComplianceTests(unittest.TestCase):
             )
 
             module_path = "lib/modules/6.0-0-lts/kernel/drivers/net/usb/rndis_host.ko.gz"
+            if apk_kernel:
+                module_path = module_path.removesuffix(".gz")
             init_files = {
                 "bin/busybox": (stat.S_IFREG | 0o755, b"busybox"),
                 "etc/init.d/rcS": (stat.S_IFREG | 0o755, b"#!/bin/sh\n"),
@@ -373,6 +396,29 @@ class ComplianceTests(unittest.TestCase):
                     }
                 )
             )
+
+            if apk_kernel:
+                kernel_path = provenance / "kernel.json"
+                kernel_record = json.loads(kernel_path.read_text())
+                for key in ("isoUrl", "isoSha256", "modloopPath", "modloopSha256"):
+                    del kernel_record[key]
+                kernel_record.update(schemaVersion=2, sourceType="apk", apkUrl=kernel["url"],
+                                     apkSha256=kernel["sha256"], vmlinuzPath="boot/vmlinuz-lts",
+                                     vmlinuzSha256=sha256(vmlinuz))
+                kernel_record["modules"][0].update(
+                    sourcePath=module_path + ".gz",
+                    sourceSha256=sha256(gzip.compress(b"kernel module", mtime=0)),
+                )
+                write_json(kernel_path, kernel_record)
+                packages_path = provenance / "packages.json"
+                records = json.loads(packages_path.read_text())
+                records["packages"].append({
+                    "name": kernel["name"], "version": kernel["version"], "origin": kernel["origin"],
+                    "license": kernel["license"], "apkSha256": kernel["sha256"],
+                    "pkginfoPath": "provenance/packages/linux-lts-6.0-r0.PKGINFO",
+                    "pkginfoSha256": sha256(kernel_pkginfo.encode()),
+                })
+                write_json(packages_path, records)
 
             for origin in ("busybox", "linux-lts"):
                 target = license_dir / origin
@@ -437,6 +483,24 @@ class ComplianceTests(unittest.TestCase):
                 )
             manifest_path.write_text(original_manifest)
 
+            if apk_kernel:
+                from common import load_lock, load_file_map, read_newc
+                _, packages = load_lock(lock_path)
+                kernel_path = provenance / "kernel.json"
+                original = kernel_path.read_text()
+                for field, replacement in (("apkSha256", "0" * 64), ("schemaVersion", 1),
+                                           ("vmlinuzSha256", "0" * 64)):
+                    altered = json.loads(original)
+                    altered[field] = replacement
+                    write_json(kernel_path, altered)
+                    with self.subTest(field=field), self.assertRaises(ComplianceError):
+                        build_compliance.validate_kernel_provenance(
+                            kernel_path, packages, sha256(iso), lock["alpine"]["isoUrl"], image,
+                            read_newc(initramfs), load_file_map(provenance / "file-map.json"),
+                            apk_dir / kernel["file"],
+                        )
+                kernel_path.write_text(original)
+
             if shutil.which("zstd") is None:
                 return
             source_root = temp / "source-staging"
@@ -453,6 +517,12 @@ class ComplianceTests(unittest.TestCase):
             (source_root / f"packages/{runtime['file']}.sha256").write_text(
                 f"{runtime['sha256']}  {runtime['file']}\n"
             )
+            if apk_kernel:
+                shutil.copyfile(provenance / "packages/linux-lts-6.0-r0.PKGINFO",
+                                source_root / f"packages/{kernel['file']}.PKGINFO")
+                (source_root / f"packages/{kernel['file']}.sha256").write_text(
+                    f"{kernel['sha256']}  {kernel['file']}\n"
+                )
             source_rows = []
             for package in (runtime, kernel):
                 origin = package["origin"]

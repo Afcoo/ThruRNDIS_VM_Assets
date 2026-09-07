@@ -111,6 +111,10 @@ class Package:
     dependencies: tuple[str, ...]
 
     @property
+    def is_apk(self) -> bool:
+        return self.role == "runtime" or self.filename.endswith(".apk")
+
+    @property
     def spdx_id(self) -> str:
         token = re.sub(r"[^A-Za-z0-9.-]+", "-", f"{self.name}-{self.version}")
         return f"SPDXRef-Package-{token}"
@@ -188,6 +192,13 @@ def load_lock(path: Path) -> tuple[dict[str, Any], list[Package]]:
             raise ComplianceError(f"{path}: runtime package file must be a basename: {values['filename']!r}")
         if not values["url"].startswith("https://") or not values["repository"].startswith("https://"):
             raise ComplianceError(f"{path}: {values['name']} package URLs must use HTTPS")
+        if values["role"] == "kernel":
+            if values["name"] != "linux-lts" or values["origin"] != "linux-lts":
+                raise ComplianceError(f"{path}: kernel must originate from linux-lts")
+            if values["filename"] not in {"boot/modloop-lts", f"linux-lts-{values['version']}.apk"}:
+                raise ComplianceError(f"{path}: unsupported kernel input file")
+            if values["filename"].endswith(".apk") and not re.fullmatch(r"[0-9a-f]{64}", values["datahash"]):
+                raise ComplianceError(f"{path}: kernel APK requires a datahash")
         dependencies = _pick(row, "dependencies", default=[])
         if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
             raise ComplianceError(f"{path}: {values['name']}.dependencies must be strings")
@@ -390,7 +401,7 @@ def pkginfo_index(directory: Path) -> dict[str, tuple[Path, dict[str, Any]]]:
 
 
 def validate_package_evidence(packages: Sequence[Package], metadata_dir: Path, apk_dir: Path) -> dict[str, Path]:
-    packages = [package for package in packages if package.role == "runtime"]
+    packages = [package for package in packages if package.is_apk]
     metadata = pkginfo_index(metadata_dir)
     archives: dict[str, Path] = {}
     expected_names = {package.name for package in packages}

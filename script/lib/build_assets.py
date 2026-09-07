@@ -22,6 +22,8 @@ import tempfile
 import urllib.request
 import zlib
 
+from apk_payload import verified_pkginfo
+
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parents[1]
 ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG = ROOT / "config/alpine.env"
@@ -120,11 +122,6 @@ def extract_linux_image(vmlinuz: pathlib.Path, destination: pathlib.Path) -> Non
     destination.chmod(0o644)
 
 
-def apk_pkginfo(apk: pathlib.Path) -> str:
-    result = run(["bsdtar", "-xOf", str(apk), ".PKGINFO"], capture_output=True)
-    return result.stdout.decode()
-
-
 def pkginfo_fields(text: str) -> dict[str, list[str]]:
     fields: dict[str, list[str]] = {}
     for raw in text.splitlines():
@@ -132,6 +129,55 @@ def pkginfo_fields(text: str) -> dict[str, list[str]]:
             key, value = raw.split(" = ", 1)
             fields.setdefault(key, []).append(value)
     return fields
+
+
+def prepare_apk(package: dict[str, object], cache: pathlib.Path, staging: pathlib.Path,
+                provenance: pathlib.Path, offline: bool) -> tuple[pathlib.Path, dict[str, object]]:
+    name = str(package["name"])
+    apk = cache / "apks" / str(package["file"])
+    atomic_download(str(package["url"]), apk, str(package["sha256"]), offline)
+    try:
+        pkginfo = verified_pkginfo(apk, str(package["apkIndexChecksum"]))
+    except ValueError as error:
+        fail(f"Invalid APK {apk.name}: {error}")
+    fields = pkginfo_fields(pkginfo)
+    for field, key in (("pkgname", "name"), ("pkgver", "version"), ("origin", "origin"),
+                       ("license", "license"), ("commit", "aportsCommit"), ("datahash", "datahash")):
+        if fields.get(field) != [str(package[key])]:
+            fail(f"Locked metadata mismatch for {apk.name}: {field}")
+    if package.get("role") == "kernel" and fields.get("arch") != ["aarch64"]:
+        fail("Kernel APK must target aarch64")
+    metadata_path = provenance / "packages" / f"{name}-{package['version']}.PKGINFO"
+    metadata_path.write_text(pkginfo)
+    package_root = staging / "packages" / name
+    package_root.mkdir(parents=True)
+    run(["bsdtar", "-xf", str(apk), "-C", str(package_root)])
+    clean_control_files(package_root)
+    return package_root, {
+        "name": name, "version": package["version"], "origin": package["origin"],
+        "license": package["license"], "apkSha256": package["sha256"],
+        "pkginfoPath": metadata_path.relative_to(provenance.parent).as_posix(),
+        "pkginfoSha256": hash_file(metadata_path),
+    }
+
+
+def kernel_apk_paths(package_root: pathlib.Path, version: str) -> tuple[pathlib.Path, pathlib.Path]:
+    match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)-r([0-9]+)", version)
+    if match is None:
+        fail(f"Unexpected linux-lts package version: {version}")
+    release = f"{match.group(1)}-{match.group(2)}-lts"
+    image = resolve_guest_path(package_root, "boot/vmlinuz-lts")
+    modules = resolve_guest_path(package_root, "lib/modules")
+    if image is None or not image.is_file() or modules is None or not modules.is_dir():
+        fail("Kernel APK lacks boot/vmlinuz-lts or lib/modules")
+    module_dirs = sorted(modules.iterdir())
+    if len(module_dirs) != 1 or module_dirs[0].name != release or not module_dirs[0].is_dir() or module_dirs[0].is_symlink():
+        fail(f"Kernel APK module directory does not match locked release {release}")
+    # Use the dependency map shipped in this exact APK. Host kmod may not
+    # support its compressed modules; only the selected closure is normalized.
+    if not (module_dirs[0] / "modules.dep").is_file():
+        fail("Kernel APK lacks modules.dep")
+    return image, module_dirs[0]
 
 
 def clean_control_files(root: pathlib.Path) -> None:
@@ -460,20 +506,29 @@ def copy_module_closure(
     for relative in sorted(selected):
         source = source_dir / relative
         if not source.is_file():
-            fail(f"Selected kernel module missing from modloop: {relative}")
-        result = run(["modinfo", "-F", "firmware", str(source)], capture_output=True, text=True)
+            fail(f"Selected kernel module missing from kernel input: {relative}")
+        target_relative = relative.removesuffix(".gz") if relative.endswith(".ko.gz") else relative
+        target = destination_dir / target_relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if relative.endswith(".ko.gz"):
+            with gzip.open(source, "rb") as compressed, target.open("wb") as output:
+                shutil.copyfileobj(compressed, output)
+            target.chmod(0o644)
+        else:
+            shutil.copy2(source, target)
+        result = run(["modinfo", "-F", "firmware", str(target)], capture_output=True, text=True)
         firmware = [line for line in result.stdout.splitlines() if line.strip()]
         if firmware:
             fail(f"Selected module requires forbidden firmware ({relative}): {', '.join(firmware)}")
-        target = destination_dir / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-        archive_path = f"lib/modules/{release}/{relative}"
+        archive_path = f"lib/modules/{release}/{target_relative}"
         owners[archive_path] = "kernel"
-        copied.append({"path": archive_path, "sha256": hash_file(target)})
+        record = {"path": archive_path, "sha256": hash_file(target)}
+        if target_relative != relative:
+            record.update(sourcePath=f"lib/modules/{release}/{relative}", sourceSha256=hash_file(source))
+        copied.append(record)
 
     # depmod generates metadata exclusively for the copied closure.  No stock
-    # module or firmware directory is carried over from modloop.
+    # module or firmware directory is carried over from the kernel input.
     run(["depmod", "-b", str(root), release])
     for metadata in sorted(destination_dir.glob("modules.*")):
         if metadata.is_file():
@@ -666,31 +721,9 @@ def main() -> int:
     owners: dict[str, str] = {}
     package_records: list[dict[str, object]] = []
     for package in runtime_packages:
-        name = str(package["name"])
-        apk = cache / "apks" / str(package["file"])
-        atomic_download(str(package["url"]), apk, str(package["sha256"]), args.offline)
-        pkginfo = apk_pkginfo(apk)
-        fields = pkginfo_fields(pkginfo)
-        actual = tuple((fields.get(key) or [""])[0] for key in ("pkgname", "pkgver", "origin", "license"))
-        expected = tuple(str(package[key]) for key in ("name", "version", "origin", "license"))
-        if actual != expected:
-            fail(f"Locked metadata mismatch for {apk.name}: expected {expected}, got {actual}")
-        metadata_path = provenance / "packages" / f"{name}-{package['version']}.PKGINFO"
-        metadata_path.write_text(pkginfo)
-        package_root = staging / "packages" / name
-        package_root.mkdir(parents=True)
-        run(["bsdtar", "-xf", str(apk), "-C", str(package_root)])
-        clean_control_files(package_root)
-        overlay(package_root, root, name, owners)
-        package_records.append({
-            "name": name,
-            "version": package["version"],
-            "origin": package["origin"],
-            "license": package["license"],
-            "apkSha256": package["sha256"],
-            "pkginfoPath": metadata_path.relative_to(output).as_posix(),
-            "pkginfoSha256": hash_file(metadata_path),
-        })
+        package_root, record = prepare_apk(package, cache, staging, provenance, args.offline)
+        overlay(package_root, root, str(package["name"]), owners)
+        package_records.append(record)
 
     install_busybox_applets(root, owners)
     install_project_files(root, owners)
@@ -712,21 +745,37 @@ def main() -> int:
             fail(f"Required guest command is not executable: {relative}")
 
     kernel_flavor = "lts"
-    vmlinuz = staging / f"vmlinuz-{kernel_flavor}"
-    modloop = staging / f"modloop-{kernel_flavor}"
-    extract_member(iso, f"boot/vmlinuz-{kernel_flavor}", vmlinuz)
-    extract_member(iso, f"boot/modloop-{kernel_flavor}", modloop)
     kernel_package = kernel_packages[0]
-    if hash_file(modloop) != kernel_package["sha256"]:
-        fail("ISO modloop hash does not match the locked kernel provenance entry")
-    image = assets / f"Image-{kernel_flavor}"
+    if str(kernel_package["file"]).endswith(".apk"):
+        package_root, record = prepare_apk(kernel_package, cache, staging, provenance, args.offline)
+        package_records.append(record)
+        vmlinuz, module_dir = kernel_apk_paths(package_root, str(kernel_package["version"]))
+        kernel_input = {
+            "schemaVersion": 2, "sourceType": "apk",
+            "apkUrl": kernel_package["url"], "apkSha256": kernel_package["sha256"],
+            "vmlinuzPath": "boot/vmlinuz-lts", "vmlinuzSha256": hash_file(vmlinuz),
+        }
+    else:
+        # Keep the checked-in ISO lock buildable until the manual updater creates
+        # and validates the first APK-based kernel lock.
+        vmlinuz = staging / "vmlinuz-lts"
+        modloop = staging / "modloop-lts"
+        extract_member(iso, "boot/vmlinuz-lts", vmlinuz)
+        extract_member(iso, "boot/modloop-lts", modloop)
+        if hash_file(modloop) != kernel_package["sha256"]:
+            fail("ISO modloop hash does not match the locked kernel provenance entry")
+        modloop_root = staging / "modloop"
+        run(["unsquashfs", "-no-progress", "-d", str(modloop_root), str(modloop)], stdout=subprocess.DEVNULL)
+        dep_files = sorted(modloop_root.rglob("modules.dep"))
+        if len(dep_files) != 1:
+            fail(f"Expected one modules.dep in modloop, found {len(dep_files)}")
+        module_dir = dep_files[0].parent
+        kernel_input = {
+            "schemaVersion": 1, "isoUrl": iso_url, "isoSha256": alpine["isoSha256"],
+            "modloopPath": "boot/modloop-lts", "modloopSha256": hash_file(modloop),
+        }
+    image = assets / "Image-lts"
     extract_linux_image(vmlinuz, image)
-    modloop_root = staging / "modloop"
-    run(["unsquashfs", "-no-progress", "-d", str(modloop_root), str(modloop)], stdout=subprocess.DEVNULL)
-    dep_files = sorted(modloop_root.rglob("modules.dep"))
-    if len(dep_files) != 1:
-        fail(f"Expected one modules.dep in modloop, found {len(dep_files)}")
-    module_dir = dep_files[0].parent
     kernel_release = module_dir.name
     match = re.fullmatch(r"(.+)-(\d+)-lts", kernel_release)
     if not match:
@@ -755,18 +804,13 @@ def main() -> int:
         for path in sorted(final_paths)
     }
 
-    modloop_hash = hash_file(modloop)
     kernel_json = {
-        "schemaVersion": 1,
+        **kernel_input,
         "kernelFlavor": kernel_flavor,
         "kernelRelease": kernel_release,
         "packageName": kernel_package["name"],
         "packageVersion": kernel_package["version"],
         "aportsCommit": kernel_package["aportsCommit"],
-        "isoUrl": iso_url,
-        "isoSha256": alpine["isoSha256"],
-        "modloopPath": f"boot/modloop-{kernel_flavor}",
-        "modloopSha256": modloop_hash,
         "imagePath": image.relative_to(output).as_posix(),
         "imageSha256": hash_file(image),
         "modules": copied_modules,

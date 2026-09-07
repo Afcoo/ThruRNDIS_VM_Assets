@@ -116,6 +116,13 @@ alter the guest's main routing table.
 
 - Normal builds and releases consume `config/packages.lock.json`; only the
   manual dependency-update workflow may resolve a fresh APKINDEX.
+- The manual updater resolves `linux-lts` from the selected stable branch's
+  `main/aarch64` APKINDEX independently of ISO releases. Keep it a separate
+  `role=kernel` build input; never add its firmware or initramfs-generator
+  installer dependencies to the guest runtime closure. Take the image and
+  module closure from the same locked APK and preserve its `.PKGINFO`, APK
+  digest, and exact aports source commit. Existing ISO-based locks retain their
+  ISO/modloop build and provenance checks until the validated updater PR lands.
 - Every executable, shared library, kernel image, and kernel module in the
   final archive must map to repository-authored source or an exact Alpine
   package/source record.

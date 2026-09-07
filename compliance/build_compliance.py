@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import gzip
 import re
 import shutil
 import sys
+import tarfile
+import zlib
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -111,6 +114,7 @@ def validate_kernel_provenance(
     kernel_image: Path,
     initramfs_entries: Sequence[Any],
     file_map: dict[str, dict[str, str]],
+    apk_path: Path | None = None,
 ) -> dict[str, Any]:
     value = load_json(path)
     if not isinstance(value, dict):
@@ -123,25 +127,28 @@ def validate_kernel_provenance(
         "packageName": kernel.name,
         "packageVersion": kernel.version,
         "aportsCommit": kernel.aports_commit,
-        "modloopSha256": kernel.sha256,
-        "isoUrl": iso_url,
     }
+    if kernel.is_apk:
+        exact.update(schemaVersion=2, sourceType="apk", apkUrl=kernel.url,
+                     apkSha256=kernel.sha256, vmlinuzPath="boot/vmlinuz-lts")
+        if any(field in value for field in ("isoUrl", "isoSha256", "modloopPath", "modloopSha256")):
+            raise ComplianceError(f"{path}: APK kernel must not claim ISO provenance")
+    else:
+        exact.update(schemaVersion=1, modloopSha256=kernel.sha256, isoUrl=iso_url,
+                     isoSha256=iso_hash, modloopPath="boot/modloop-lts")
     for field, expected in exact.items():
         if value.get(field) != expected:
             raise ComplianceError(f"{path}: {field} differs from the locked kernel provenance")
     if value.get("imageSha256") != sha256_file(kernel_image):
         raise ComplianceError(f"{path}: imageSha256 differs from {kernel_image.name}")
-    if value.get("schemaVersion") != 1 or value.get("kernelFlavor") != "lts":
+    if value.get("kernelFlavor") != "lts":
         raise ComplianceError(f"{path}: unsupported kernel provenance schema/flavor")
     kernel_release = value.get("kernelRelease")
     match = re.fullmatch(r"(.+)-(\d+)-lts", str(kernel_release))
     if match is None or f"{match.group(1)}-r{match.group(2)}" != kernel.version:
         raise ComplianceError(f"{path}: kernelRelease does not map to the locked package version")
-    if value.get("modloopPath") != "boot/modloop-lts" or value.get("imagePath") != "assets/Image-lts":
+    if value.get("imagePath") != "assets/Image-lts":
         raise ComplianceError(f"{path}: kernel input/output paths differ from the distribution contract")
-    provenance_iso_hash = value.get("isoSha256")
-    if provenance_iso_hash != iso_hash:
-        raise ComplianceError(f"{path}: ISO SHA-256 differs from the locked ISO")
     modules = value.get("modules") or value.get("copiedModules")
     if not isinstance(modules, list) or not modules:
         raise ComplianceError(f"{path}: copied module provenance is missing")
@@ -176,7 +183,73 @@ def validate_kernel_provenance(
     for module_path, expected_hash in declared_modules.items():
         if entry_hashes.get(module_path) != expected_hash:
             raise ComplianceError(f"{path}: copied module hash differs for {module_path}")
+    if kernel.is_apk:
+        if apk_path is None or not apk_path.is_file() or sha256_file(apk_path) != kernel.sha256:
+            raise ComplianceError(f"{path}: locked kernel APK is missing or corrupt")
+        validate_kernel_apk_contents(apk_path, kernel, value, kernel_image, modules)
     return value
+
+
+def validate_kernel_apk_contents(apk: Path, kernel: Package, provenance: dict[str, Any], image: Path,
+                                 modules: Sequence[dict[str, str]]) -> None:
+    """Read back the selected bytes from the APK independently of the builder."""
+    source_modules = {}
+    for module in modules:
+        source = module.get("sourcePath", module["path"])
+        if source != module["path"]:
+            if source != module["path"] + ".gz" or not re.fullmatch(r"[0-9a-f]{64}", module.get("sourceSha256", "")):
+                raise ComplianceError("unsupported kernel module transformation")
+        if source in source_modules:
+            raise ComplianceError("duplicate kernel APK source module")
+        source_modules[source] = module
+    wanted = {".PKGINFO", "boot/vmlinuz-lts", *source_modules}
+    seen: set[str] = set()
+    try:
+        with tarfile.open(apk, mode="r:gz", ignore_zeros=True) as archive:
+            for member in archive:
+                name = member.name.removeprefix("./")
+                if name not in wanted:
+                    continue
+                if name in seen or not member.isfile():
+                    raise ComplianceError(f"kernel APK has duplicate/non-regular payload: {name}")
+                seen.add(name)
+                stream = archive.extractfile(member)
+                assert stream is not None
+                data = stream.read()
+                if name == ".PKGINFO":
+                    fields: dict[str, list[str]] = {}
+                    for line in data.decode().splitlines():
+                        if " = " in line:
+                            key, field_value = line.split(" = ", 1)
+                            fields.setdefault(key, []).append(field_value)
+                    expected = {"pkgname": kernel.name, "pkgver": kernel.version,
+                                "origin": kernel.origin, "license": kernel.license_expression,
+                                "commit": kernel.aports_commit, "datahash": kernel.datahash,
+                                "arch": "aarch64"}
+                    if any(fields.get(key) != [value] for key, value in expected.items()):
+                        raise ComplianceError("kernel APK metadata differs from lock")
+                elif name == "boot/vmlinuz-lts":
+                    if hashlib.sha256(data).hexdigest() != provenance.get("vmlinuzSha256"):
+                        raise ComplianceError("kernel vmlinuz differs from APK")
+                    offset = data.find(b"\x1f\x8b\x08")
+                    if offset < 0:
+                        raise ComplianceError("kernel APK lacks gzip Linux Image")
+                    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                    unpacked = decoder.decompress(data[offset:]) + decoder.flush()
+                    if not decoder.eof or unpacked != image.read_bytes():
+                        raise ComplianceError("kernel Image differs from APK payload")
+                else:
+                    module = source_modules[name]
+                    if name != module["path"]:
+                        if hashlib.sha256(data).hexdigest() != module["sourceSha256"]:
+                            raise ComplianceError(f"compressed kernel module differs from APK: {name}")
+                        data = gzip.decompress(data)
+                    if hashlib.sha256(data).hexdigest() != module["sha256"]:
+                        raise ComplianceError(f"kernel module differs from APK payload: {name}")
+    except (tarfile.TarError, OSError, EOFError, zlib.error, UnicodeError) as error:
+        raise ComplianceError(f"cannot inspect kernel APK: {error}") from error
+    if seen != wanted:
+        raise ComplianceError(f"kernel APK lacks selected files: {sorted(wanted - seen)}")
 
 
 def validate_packages_provenance(
@@ -199,10 +272,10 @@ def validate_packages_provenance(
         for row in rows
         if isinstance(row, dict) and isinstance(row.get("name"), str)
     }
-    runtime = [package for package in packages if package.role == "runtime"]
-    if len(by_name) != len(rows) or set(by_name) != {package.name for package in runtime}:
-        raise ComplianceError(f"{path}: runtime package set differs from lock")
-    for package in runtime:
+    apk_packages = [package for package in packages if package.is_apk]
+    if len(by_name) != len(rows) or set(by_name) != {package.name for package in apk_packages}:
+        raise ComplianceError(f"{path}: APK package set differs from lock")
+    for package in apk_packages:
         row = by_name[package.name]
         expected = {
             "version": package.version,
@@ -405,7 +478,7 @@ def make_sbom(
                 "referenceLocator": package.aports_commit,
             }
         ]
-        if package.role == "runtime":
+        if package.is_apk:
             external_refs.insert(
                 0,
                 {
@@ -528,6 +601,7 @@ def run(arguments: argparse.Namespace) -> None:
         kernel_image,
         entries,
         file_map,
+        apk_dir / next(package.filename for package in packages if package.role == "kernel"),
     )
 
     compliance_dir = asset_dir / "compliance"

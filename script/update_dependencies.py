@@ -11,7 +11,6 @@ that reads APKINDEX and changes the dependency closure.
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import io
 import json
@@ -28,6 +27,9 @@ import urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "config/alpine.env"
 DEFAULT_LOCK = ROOT / "config/packages.lock.json"
+sys.path.insert(0, str(ROOT / "script/lib"))
+
+from apk_payload import verified_pkginfo  # noqa: E402
 
 
 def fail(message: str) -> "NoReturn":
@@ -71,7 +73,7 @@ ALPINE_APORTS_COMMIT={values['ALPINE_APORTS_COMMIT']}
 # closure is recorded in packages.lock.json.
 GUEST_ROOT_PACKAGES=\"{roots}\"
 
-# Kernel modules copied from the ISO's modloop.  A module already built into
+# Kernel modules copied from the locked linux-lts APK.  A module built into
 # the kernel satisfies a seed; otherwise its modules.dep closure is copied.
 KERNEL_MODULES=\"{modules}\"
 """
@@ -99,18 +101,6 @@ def fetch(url: str, destination: pathlib.Path | None = None) -> bytes:
         return b""
 
 
-def fetch_with_curl(url: str) -> bytes:
-    curl = shutil.which("curl")
-    if not curl:
-        fail("curl is required to fetch Alpine aports source metadata")
-    result = subprocess.run(
-        [curl, "-fsSL", "--retry", "3", "--retry-delay", "2", url],
-        check=True,
-        capture_output=True,
-    )
-    return result.stdout
-
-
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -119,62 +109,43 @@ def sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def ensure_download(url: str, destination: pathlib.Path, expected: str) -> None:
-    if destination.is_file() and sha256(destination) == expected:
-        return
-    if destination.exists():
-        destination.unlink()
-    fetch(url, destination)
-    actual = sha256(destination)
-    if actual != expected:
-        destination.unlink()
-        fail(f"SHA-256 mismatch for {url}: expected {expected}, got {actual}")
+def select_kernel(catalog: list[dict[str, object]]) -> dict[str, object]:
+    # This APK supplies build inputs only. Its installer dependencies (including
+    # firmware and initramfs-generator) must not enter the guest runtime closure.
+    candidates = [package for package in catalog
+                  if package["name"] == "linux-lts" and package["repositoryName"] == "main"]
+    if len(candidates) != 1:
+        fail(f"Expected one linux-lts APK in main, found {len(candidates)}")
+    return candidates[0]
 
 
-def extract_member(archive: pathlib.Path, member: str, destination: pathlib.Path) -> None:
-    bsdtar = shutil.which("bsdtar") or shutil.which("tar")
-    if not bsdtar:
-        fail("bsdtar is required to inspect the Alpine ISO")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("wb") as handle:
-        subprocess.run([bsdtar, "-xOf", str(archive), member], check=True, stdout=handle)
-    if destination.stat().st_size == 0:
-        fail(f"Missing or empty {member} in {archive}")
-
-
-def kernel_package(aports_commit: str, iso_url: str, iso_sha256: str, cache_dir: pathlib.Path) -> dict[str, object]:
-    apkbuild_url = (
-        "https://git.alpinelinux.org/aports/plain/main/linux-lts/APKBUILD"
-        f"?id={aports_commit}"
-    )
-    apkbuild = fetch_with_curl(apkbuild_url).decode()
-    version_match = re.search(r"^pkgver=([^\s#]+)$", apkbuild, re.MULTILINE)
-    release_match = re.search(r"^pkgrel=([0-9]+)$", apkbuild, re.MULTILINE)
-    license_match = re.search(r'^license=["\']?([^"\'\n]+)', apkbuild, re.MULTILINE)
-    if not version_match or not release_match or not license_match:
-        fail(f"Unable to parse linux-lts metadata from {apkbuild_url}")
-    version = f"{version_match.group(1)}-r{release_match.group(1)}"
-    iso = cache_dir / "iso" / pathlib.PurePosixPath(iso_url).name
-    ensure_download(iso_url, iso, iso_sha256)
-    with tempfile.TemporaryDirectory() as temp:
-        modloop = pathlib.Path(temp) / "modloop-lts"
-        extract_member(iso, "boot/modloop-lts", modloop)
-        modloop_sha256 = sha256(modloop)
-    return {
-        "name": "linux-lts",
-        "version": version,
-        "file": "boot/modloop-lts",
-        "repositoryName": "release-iso",
-        "repository": iso_url,
-        "url": f"{iso_url}#boot/modloop-lts",
-        "sha256": modloop_sha256,
-        "origin": "linux-lts",
-        "license": license_match.group(1).strip(),
-        "aportsCommit": aports_commit,
-        "datahash": f"sha256:{modloop_sha256}",
-        "dependencies": [],
-        "role": "kernel",
-    }
+def lock_apk(package: dict[str, object], role: str, cache: pathlib.Path, arch: str) -> dict[str, object]:
+    package = dict(package)
+    if not package["license"] or not package["aportsCommit"] or not package["apkIndexChecksum"]:
+        fail(f"Incomplete provenance in APKINDEX for {package['name']}")
+    apk = cache / str(package["file"])
+    fetch(str(package["url"]), apk)
+    try:
+        fields = pkginfo_fields(verified_pkginfo(apk, str(package["apkIndexChecksum"])))
+    except ValueError as error:
+        fail(f"Invalid APK {package['file']}: {error}")
+    expected = (str(package["name"]), str(package["version"]), str(package["origin"]), str(package["license"]))
+    actual = tuple((fields.get(key) or [""])[0] for key in ("pkgname", "pkgver", "origin", "license"))
+    if expected != actual:
+        fail(f"APKINDEX/.PKGINFO mismatch for {package['file']}: expected {expected}, got {actual}")
+    commit = (fields.get("commit") or [""])[0]
+    datahash = (fields.get("datahash") or [""])[0]
+    package_arch = (fields.get("arch") or [""])[0]
+    if package_arch not in ({arch} if role == "kernel" else {arch, "noarch"}):
+        fail(f"Unexpected APK architecture for {package['file']}: {package_arch}")
+    if commit != package["aportsCommit"] or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        fail(f"Invalid .PKGINFO source commit for {package['file']}")
+    if not re.fullmatch(r"[0-9a-f]{64}", datahash):
+        fail(f"Invalid .PKGINFO datahash for {package['file']}")
+    package.update(sha256=sha256(apk), datahash=datahash, role=role)
+    package.pop("provides", None)
+    package.pop("providerPriority", None)
+    return package
 
 
 def parse_latest_releases(text: str) -> list[dict[str, str]]:
@@ -329,14 +300,6 @@ def resolve_closure(catalog: list[dict[str, object]], roots: list[str]) -> list[
     return [selected[name] for name in sorted(selected)]
 
 
-def apk_pkginfo(apk: pathlib.Path) -> str:
-    bsdtar = shutil.which("bsdtar") or shutil.which("tar")
-    if not bsdtar:
-        fail("bsdtar is required to inspect Alpine APK metadata")
-    result = subprocess.run([bsdtar, "-xOf", str(apk), ".PKGINFO"], check=True, capture_output=True)
-    return result.stdout.decode()
-
-
 def pkginfo_fields(text: str) -> dict[str, list[str]]:
     fields: dict[str, list[str]] = {}
     for raw in text.splitlines():
@@ -392,32 +355,14 @@ def main() -> int:
         index_hashes[repository] = hashlib.sha256(archive).hexdigest()
         catalog.extend(parse_index(archive, repository, repository_url))
 
-    packages = resolve_closure(catalog, env["GUEST_ROOT_PACKAGES"].split())
+    runtime = resolve_closure(catalog, env["GUEST_ROOT_PACKAGES"].split())
+    if any(package["name"] == "linux-lts" for package in runtime):
+        fail("linux-lts must be a kernel input, not a guest runtime package")
+    kernel = select_kernel(catalog)
     apk_cache = args.cache_dir / "apks"
     apk_cache.mkdir(parents=True, exist_ok=True)
-    for package in packages:
-        if not package["license"] or not package["aportsCommit"] or not package["apkIndexChecksum"]:
-            fail(f"Incomplete provenance in APKINDEX for {package['name']}")
-        apk = apk_cache / str(package["file"])
-        fetch(str(package["url"]), apk)
-        package["sha256"] = sha256(apk)
-        package["role"] = "runtime"
-        fields = pkginfo_fields(apk_pkginfo(apk))
-        expected = (str(package["name"]), str(package["version"]), str(package["origin"]), str(package["license"]))
-        actual = tuple((fields.get(key) or [""])[0] for key in ("pkgname", "pkgver", "origin", "license"))
-        if expected != actual:
-            fail(f"APKINDEX/.PKGINFO mismatch for {package['file']}: expected {expected}, got {actual}")
-        commit = (fields.get("commit") or [""])[0]
-        datahash = (fields.get("datahash") or [""])[0]
-        if commit != package["aportsCommit"] or not re.fullmatch(r"[0-9a-f]{64}", datahash):
-            fail(f"Invalid .PKGINFO provenance for {package['file']}")
-        package["datahash"] = datahash
-        package.pop("provides", None)
-        package.pop("providerPriority", None)
-
-    packages.append(kernel_package(
-        env["ALPINE_APORTS_COMMIT"], iso_url, env["ALPINE_ISO_SHA256"], args.cache_dir,
-    ))
+    packages = [lock_apk(package, "runtime", apk_cache, env["ALPINE_ARCH"]) for package in runtime]
+    packages.append(lock_apk(kernel, "kernel", apk_cache, env["ALPINE_ARCH"]))
     packages.sort(key=lambda package: (str(package["name"]), str(package["role"])))
 
     lock = {
@@ -441,7 +386,7 @@ def main() -> int:
     atomic_write(args.lock, (json.dumps(lock, indent=2, sort_keys=True) + "\n").encode())
     print(f"Locked Alpine {env['ALPINE_VERSION']} ({env['ALPINE_ARCH']})")
     runtime_count = sum(package["role"] == "runtime" for package in packages)
-    print(f"Locked {runtime_count} runtime APKs and one kernel source in {args.lock}")
+    print(f"Locked {runtime_count} runtime APKs and linux-lts {kernel['version']} APK in {args.lock}")
     return 0
 
 

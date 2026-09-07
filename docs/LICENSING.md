@@ -63,6 +63,12 @@ for as long as the corresponding binary Release remains available. Release
 assets are not deleted or replaced in place. A corrected distribution receives
 a new release revision.
 
+Kernel updates use the exact `linux-lts` APK and its `.PKGINFO` source commit,
+independently of the Alpine ISO's source commit. The APK's kernel image and
+selected modules are verified against the final payload. Firmware and package
+installation dependencies are not implicitly distributed. Legacy ISO-based
+kernel locks retain their ISO/modloop provenance checks.
+
 ## Automated policy gates
 
 A release is rejected when any of these conditions holds:

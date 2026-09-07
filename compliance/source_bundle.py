@@ -620,10 +620,10 @@ def copy_package_evidence(
     destination.mkdir(parents=True, exist_ok=True)
     expected_names = {package.name for package in packages}
     if set(archives) != expected_names:
-        raise ComplianceError("validated APK evidence set differs from runtime package set")
+        raise ComplianceError("validated APK evidence set differs from APK package set")
     metadata = pkginfo_index(metadata_dir)
     if set(metadata) != expected_names:
-        raise ComplianceError("validated .PKGINFO set differs from runtime package set")
+        raise ComplianceError("validated .PKGINFO set differs from APK package set")
     for package in sorted(packages, key=lambda item: item.name):
         metadata_path, _ = metadata[package.name]
         target = destination / f"{package.filename}.PKGINFO"
@@ -634,6 +634,11 @@ def copy_package_evidence(
 
 def make_building(lock: Mapping[str, Any], commit: str, packages: Sequence[Package]) -> str:
     alpine = lock["alpine"]
+    kernel = next(package for package in packages if package.role == "kernel")
+    kernel_input = (
+        "the locked linux-lts APK's `boot/vmlinuz-lts` and `lib/modules/`. A local"
+        if kernel.is_apk else "the locked ISO's `boot/vmlinuz-lts` and `boot/modloop-lts`. A local"
+    )
     return "\n".join(
         (
             "# Reconstructing the VM Assets",
@@ -660,7 +665,7 @@ def make_building(lock: Mapping[str, Any], commit: str, packages: Sequence[Packa
             "",
             "Separately pre-provision the official Alpine ISO at",
             f"`build/cache/iso/{PurePosixPath(str(alpine['isoUrl'])).name}` and every official",
-            "runtime APK at `build/cache/apks/<locked file name>`. Every file must match",
+            "APK (including the kernel APK when locked) at `build/cache/apks/<locked file name>`. Every file must match",
             "the SHA-256 recorded in `config/packages.lock.json`; the builder rejects local",
             "recompilations or any other mismatch. Then run:",
             "",
@@ -670,7 +675,7 @@ def make_building(lock: Mapping[str, Any], commit: str, packages: Sequence[Packa
             "```",
             "",
             "The exact published kernel image and selected modules are reassembled from",
-            "the locked ISO's `boot/vmlinuz-lts` and `boot/modloop-lts`. A local",
+            kernel_input,
             "`linux-lts` recompilation demonstrates source buildability but is not consumed",
             "by this exact-binary reassembly path.",
             "",
@@ -753,8 +758,8 @@ def run(arguments: argparse.Namespace) -> None:
     policy = load_policy(arguments.policy.resolve())
     for package in packages:
         normalize_license(package.license_expression, policy)
-    runtime_packages = [package for package in packages if package.role == "runtime"]
-    archives = validate_package_evidence(runtime_packages, build_dir / "provenance/packages", build_dir / "cache/apks")
+    apk_packages = [package for package in packages if package.is_apk]
+    archives = validate_package_evidence(apk_packages, build_dir / "provenance/packages", build_dir / "cache/apks")
 
     if staging.exists():
         shutil.rmtree(staging)
@@ -762,7 +767,7 @@ def run(arguments: argparse.Namespace) -> None:
     commit = git_archive(repo, staging / "builder")
     asset_config = load_vm_asset_config(staging / "builder/config/vm-assets.json")
     epoch = source_date_epoch(repo)
-    copy_package_evidence(runtime_packages, build_dir / "provenance/packages", archives, staging / "packages")
+    copy_package_evidence(apk_packages, build_dir / "provenance/packages", archives, staging / "packages")
 
     prepare_aports_cache(aports_cache, arguments.aports_url)
     patterns = policy.get("source_license_patterns", [])

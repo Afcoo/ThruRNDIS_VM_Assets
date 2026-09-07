@@ -36,7 +36,7 @@ jobs:
             xz-utils zip zstd
           docker version
 
-      - name: Resolve latest stable Alpine and package lock
+      - name: Resolve latest stable Alpine, runtime APKs, and kernel APK
         run: |
           cp config/packages.lock.json "$RUNNER_TEMP/packages.lock.before.json"
           python3 script/update_dependencies.py \
@@ -45,13 +45,29 @@ jobs:
             --latest \
             --cache-dir build/cache
 
+      - name: Require independently locked kernel APK
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          from pathlib import Path
+
+          lock = json.loads(Path("config/packages.lock.json").read_text())
+          kernels = [package for package in lock["packages"] if package.get("role") == "kernel"]
+          assert len(kernels) == 1, "Expected exactly one kernel input"
+          kernel = kernels[0]
+          assert kernel["name"] == "linux-lts" and kernel["repositoryName"] == "main"
+          assert kernel["file"] == f"linux-lts-{kernel['version']}.apk", "Kernel still follows the release ISO"
+          assert "linux-lts" not in lock["rootPackages"], "Kernel must not enter the runtime closure"
+          print(f"Kernel candidate: {kernel['name']} {kernel['version']} ({kernel['url']})")
+          PYTHON
+
       - name: Detect dependency changes
         id: changes
         shell: bash
         run: |
           if git diff --quiet -- config/alpine.env config/packages.lock.json; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No newer Alpine release or package revision was found."
+            echo "No newer Alpine release, runtime APK, or linux-lts APK revision was found."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             git diff --stat -- config/alpine.env config/packages.lock.json
@@ -105,6 +121,7 @@ jobs:
                           transition(old and old.get("origin"), new and new.get("origin")),
                           transition(old and old.get("aportsCommit"), new and new.get("aportsCommit")),
                           transition(old and old.get("sha256"), new and new.get("sha256")),
+                          transition(old and old.get("url"), new and new.get("url")),
                       )
                   )
                   + " |"
@@ -122,8 +139,8 @@ jobs:
           if rows:
               output.extend(
                   (
-                      "| Package | Role | Change | Version | License | Origin | aports commit | Artifact SHA-256 |",
-                      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+                      "| Package | Role | Change | Version | License | Origin | aports commit | Artifact SHA-256 | Artifact URL |",
+                      "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
                       *rows,
                   )
               )
@@ -249,6 +266,19 @@ jobs:
 
           grep -Fq "thrurndis-rcS: early boot setup finished" build/qemu-smoke.log
 
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          lock = json.loads(Path("config/packages.lock.json").read_text())
+          kernel = next(package for package in lock["packages"] if package.get("role") == "kernel")
+          release = kernel["version"].replace("-r", "-") + "-lts"
+          log = Path("build/qemu-smoke.log").read_text(errors="replace")
+          if f"Linux version {release} " not in log:
+              raise SystemExit(f"QEMU did not boot the locked kernel {release}")
+          print(f"Verified booted kernel: {release}")
+          PY
+
       - name: Push validated candidate and open pull request
         if: steps.changes.outputs.changed == 'true'
         shell: bash
@@ -271,7 +301,7 @@ jobs:
           git push --set-upstream origin "$BRANCH"
 
           printf '%s\n' \
-            "Refreshes the pinned Alpine release and APK dependency closure." \
+            "Refreshes the pinned Alpine release, runtime APK closure, and linux-lts kernel APK." \
             "" \
             "The workflow built the binary archive and corresponding-source archive," \
             "validated license/SBOM provenance, and completed the QEMU aarch64 boot smoke test." \

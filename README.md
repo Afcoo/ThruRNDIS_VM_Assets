@@ -185,7 +185,20 @@ they explicitly support. Versioned Release tags use the matching
 The build is intentionally lock-driven. It does not silently select newer
 packages. To propose an Alpine or APK refresh, run the **Update dependencies**
 workflow manually; it verifies the candidate distribution and opens a pull
-request instead of changing `main` directly.
+request instead of changing `main` directly. It resolves `linux-lts` from the
+same stable branch's `main/aarch64` APKINDEX independently of ISO releases, so
+kernel package revisions are included even when the Alpine ISO is unchanged.
+
+The kernel APK is a separate build input, not a guest root package. The builder
+extracts `boot/vmlinuz-lts` and only the required module dependency closure from
+that same locked APK. Selected gzip modules are decompressed to `.ko` files and
+verified against their original APK bytes, allowing host kmod builds without
+gzip support. The builder assembles the guest without running its install scripts
+or adding its firmware and initramfs-generator dependencies. APK metadata, digests, and the exact kernel
+aports recipe are preserved with the corresponding source and SBOM. Existing
+ISO-based locks remain buildable; the next manual dependency update proposes the
+migration as a validated PR. Normal verification and release builds never resolve
+new package versions.
 
 ## Verification and releases
 

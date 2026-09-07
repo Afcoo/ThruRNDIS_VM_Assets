@@ -454,7 +454,7 @@ def verify_source_bundle(
             recipe_path = root / "aports" / package.aports_commit / channel / package.origin / "APKBUILD"
             if not recipe_path.is_file():
                 raise ComplianceError(f"source bundle lacks exact aports recipe for {package.name}: {recipe_path}")
-            if package.role == "runtime":
+            if package.is_apk:
                 metadata = f"packages/{package.filename}.PKGINFO"
                 digest = f"packages/{package.filename}.sha256"
                 if metadata not in actual or digest not in actual:
@@ -567,6 +567,7 @@ def run(arguments: argparse.Namespace) -> None:
         kernel_image,
         entries,
         file_map,
+        build_dir / "cache/apks" / next(package.filename for package in packages if package.role == "kernel"),
     )
 
     verify_manifest(

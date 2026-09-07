@@ -106,7 +106,7 @@ they are not host-side setup scripts and are not run by the macOS app.
   `thrurndis.local` on `usb0` only. The advertisement is IPv4-only, does not
   reflect mDNS between interfaces, and must not publish example SSH/SFTP
   services or DNS servers. The repository-owned `thrurndis.service` also
-  publishes `ThruRNDIS._thrurndis._tcp.local` for Android NSD address discovery,
+  publishes `ThruRNDIS._nvstream._tcp.local` for Android NSD address discovery,
   with SRV target `thrurndis.local`, port `0`, and TXT `txtvers=1`,
   `hostname=thrurndis.local`, and `discovery-only=1`. This is discovery only:
   clients use the resolved IPv4 with a separately configured forwarded port;

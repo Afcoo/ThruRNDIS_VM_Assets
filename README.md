@@ -73,7 +73,7 @@ Gateway readiness fails closed if it cannot claim exactly `thrurndis.local`,
 including when a collision would make it fall back to a suffixed name.
 
 Avahi also publishes the address-discovery DNS-SD service
-`ThruRNDIS._thrurndis._tcp.local` with SRV target `thrurndis.local`, port `0`,
+`ThruRNDIS._nvstream._tcp.local` with SRV target `thrurndis.local`, port `0`,
 and TXT records `txtvers=1`, `hostname=thrurndis.local`, and `discovery-only=1`.
 Port zero is intentional: this custom service discovers the gateway address;
 it does not announce a TCP listener or an available forwarded macOS service.
@@ -111,7 +111,7 @@ pass the guest's status checks.
 
 ### Android NSD discovery
 
-Android clients browse `_thrurndis._tcp` using `NsdManager.PROTOCOL_DNS_SD`,
+Android clients browse `_nvstream._tcp` using `NsdManager.PROTOCOL_DNS_SD`,
 then resolve each discovered `NsdServiceInfo` with `resolveService` or
 `registerServiceInfoCallback`. Request discovery on all available networks
 (`network = null` on the network-specific API overload) so the Android NSD
@@ -139,7 +139,7 @@ also checks that this file matches its build-time SHA-256. These are local
 configuration/process checks, not proof that an Android peer received records.
 To observe DNS-SD PTR, SRV, TXT and A traffic, run
 `tcpdump -ni usb0 -vv 'udp port 5353'` in the guest while the client discovers
-and resolves `_thrurndis._tcp`.
+and resolves `_nvstream._tcp`.
 
 ### Initramfs boot responsibilities
 

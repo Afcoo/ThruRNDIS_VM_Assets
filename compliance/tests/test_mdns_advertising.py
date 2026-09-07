@@ -201,7 +201,7 @@ class MdnsAdvertisingTests(unittest.TestCase):
         self.assertEqual(group.findtext("name"), "ThruRNDIS")
         service = group.find("service")
         self.assertEqual(service.attrib, {"protocol": "ipv4"})
-        self.assertEqual(service.findtext("type"), "_thrurndis._tcp")
+        self.assertEqual(service.findtext("type"), "_nvstream._tcp")
         self.assertEqual(service.findtext("domain-name"), "local")
         self.assertEqual(service.findtext("host-name"), "thrurndis.local")
         self.assertEqual(service.findtext("port"), "0")

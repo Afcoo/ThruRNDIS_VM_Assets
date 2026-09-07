@@ -10,7 +10,7 @@ Clients resolve this service, then use their separately configured host port.
 <service-group>
   <name replace-wildcards="no">ThruRNDIS</name>
   <service protocol="ipv4">
-    <type>_thrurndis._tcp</type>
+    <type>_nvstream._tcp</type>
     <domain-name>local</domain-name>
     <host-name>thrurndis.local</host-name>
     <port>0</port>

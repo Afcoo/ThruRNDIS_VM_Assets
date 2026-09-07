@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import posixpath
 import re
@@ -20,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 from common import (
+    CpioEntry,
     ComplianceError,
     Package,
     canonical_json,
@@ -70,6 +72,31 @@ def unique_asset(asset_dir: Path, pattern: str) -> Path:
     if matches[0].stat().st_size == 0:
         raise ComplianceError(f"empty asset: {matches[0]}")
     return matches[0]
+
+
+def verify_mdns_payload(entries: Sequence[CpioEntry], repo: Path) -> None:
+    """Require the reviewed static service, its digest and usb0-only config."""
+    service_path = "etc/avahi/services/thrurndis.service"
+    services = {
+        entry.path for entry in entries
+        if entry.path.startswith("etc/avahi/services/")
+    }
+    if services != {service_path}:
+        raise ComplianceError(f"DNS-SD service allowlist differs: {sorted(services)}")
+    by_path = {entry.path: entry for entry in entries}
+    service = (repo / "script/thrurndis.service").read_bytes()
+    expected = {
+        service_path: service,
+        "etc/avahi/avahi-daemon.conf": (repo / "script/avahi-daemon.conf").read_bytes(),
+        "usr/local/libexec/thrurndis/mdns-service.sha256":
+            (hashlib.sha256(service).hexdigest() + "\n").encode(),
+    }
+    for path, content in expected.items():
+        entry = by_path.get(path)
+        if entry is None or entry.kind != "file" or entry.data != content:
+            raise ComplianceError(f"DNS-SD payload differs from repository: {path}")
+        if stat.S_IMODE(entry.mode) != 0o644:
+            raise ComplianceError(f"DNS-SD payload mode differs: {path}")
 
 
 def verify_checksum_file(asset_dir: Path) -> None:
@@ -553,6 +580,7 @@ def run(arguments: argparse.Namespace) -> None:
     validate_asset_allowlist(asset_dir, kernel_image, initramfs)
     entries = read_newc(initramfs)
     check_initramfs_content(entries)
+    verify_mdns_payload(entries, repo)
     file_map = load_file_map(provenance_dir / "file-map.json")
     verify_file_map(entries, file_map, packages)
     iso = find_iso(build_dir, lock["alpine"]["isoUrl"])

@@ -105,13 +105,22 @@ they are not host-side setup scripts and are not run by the macOS app.
   forwarding, Avahi publishes that address as the fixed link-local mDNS name
   `thrurndis.local` on `usb0` only. The advertisement is IPv4-only, does not
   reflect mDNS between interfaces, and must not publish example SSH/SFTP
-  services or DNS servers. Treat an Avahi failure, stale interface state,
+  services or DNS servers. The repository-owned `thrurndis.service` also
+  publishes `ThruRNDIS._thrurndis._tcp.local` for Android NSD address discovery,
+  with SRV target `thrurndis.local`, port `0`, and TXT `txtvers=1`,
+  `hostname=thrurndis.local`, and `discovery-only=1`. This is discovery only:
+  clients use the resolved IPv4 with a separately configured forwarded port;
+  no application listener or example service is implied. Keep this static
+  service present independently of optional port forwarding.
+  Treat an Avahi failure, stale interface state,
   daemon exit, or fallback collision name such as
   `thrurndis-2.local` as incomplete gateway state; never report the gateway
   ready under a name other than exactly `thrurndis.local`.
 - `mdns-advertising` is the gateway's side-effect-free Avahi status module. It
   waits for and validates the init-supervised, privilege-dropped foreground
   daemon, exact name, live address, and `usb0` multicast membership. It must
+  also check the static DNS-SD service against its build-time SHA-256. These
+  local checks do not prove peer receipt or completed NSD resolution. It must
   not mutate Avahi process state. The nftables prerouting chain must exempt
   IPv4 mDNS multicast
   `224.0.0.251:5353` before the optional UDP forwarding rule so forwarding port

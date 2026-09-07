@@ -72,6 +72,12 @@ RNDIS detach, reconnect, and address changes itself while remaining resident.
 Gateway readiness fails closed if it cannot claim exactly `thrurndis.local`,
 including when a collision would make it fall back to a suffixed name.
 
+Avahi also publishes the address-discovery DNS-SD service
+`ThruRNDIS._thrurndis._tcp.local` with SRV target `thrurndis.local`, port `0`,
+and TXT records `txtvers=1`, `hostname=thrurndis.local`, and `discovery-only=1`.
+Port zero is intentional: this custom service discovers the gateway address;
+it does not announce a TCP listener or an available forwarded macOS service.
+
 The machine-readable console contract is line-oriented:
 
 ```text
@@ -102,6 +108,38 @@ failed rule setup. Current codes are `invalid-state`, `nft-unavailable`,
 configuration is valid but the RNDIS gateway is not ready; `active` is emitted
 only after the matching rules and exact `thrurndis.local` Avahi advertisement
 pass the guest's status checks.
+
+### Android NSD discovery
+
+Android clients browse `_thrurndis._tcp` using `NsdManager.PROTOCOL_DNS_SD`,
+then resolve each discovered `NsdServiceInfo` with `resolveService` or
+`registerServiceInfoCallback`. Request discovery on all available networks
+(`network = null` on the network-specific API overload) so the Android NSD
+backend can include the USB tethering downstream. Do not restrict discovery
+to the phone's upstream Wi-Fi or cellular `Network`.
+
+The resolved host addresses contain the guest's live RNDIS IPv4. Validate TXT
+`txtvers=1`, `hostname=thrurndis.local`, and `discovery-only=1`; use the returned
+IPv4 with the separately configured forwarded port, not the SRV port zero.
+The service instance normally appears as `ThruRNDIS`, but clients should match
+the service type and metadata, not rely on an unchanged instance name after a
+DNS-SD service-name collision. The gateway still requires the exact host name
+`thrurndis.local` and rejects a host-name collision.
+
+NSD discovery does not install a system-wide `.local` DNS mapping for other
+Android apps or browsers. DNS-SD and the A record remain present with port
+forwarding inactive; discovering the address alone does not promise a host
+service is reachable. Device NSD backend support and local-network permissions
+still apply. See the [Android NSD guide](https://developer.android.com/develop/connectivity/wifi/use-nsd)
+and [local-network permission policy](https://developer.android.com/privacy-and-security/local-network-permission).
+
+The build installs only the repository-owned `thrurndis.service`, removes
+Alpine's example services, and records its project provenance. Gateway status
+also checks that this file matches its build-time SHA-256. These are local
+configuration/process checks, not proof that an Android peer received records.
+To observe DNS-SD PTR, SRV, TXT and A traffic, run
+`tcpdump -ni usb0 -vv 'udp port 5353'` in the guest while the client discovers
+and resolves `_thrurndis._tcp`.
 
 ### Initramfs boot responsibilities
 

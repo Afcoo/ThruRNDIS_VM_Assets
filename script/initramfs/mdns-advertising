@@ -14,6 +14,8 @@ THRURNDIS_MDNS_UID=86
 THRURNDIS_MDNS_GID=86
 THRURNDIS_MDNS_AVAHI_DAEMON=${THRURNDIS_MDNS_AVAHI_DAEMON:-/usr/sbin/avahi-daemon}
 THRURNDIS_MDNS_CONFIG=${THRURNDIS_MDNS_CONFIG:-/etc/avahi/avahi-daemon.conf}
+THRURNDIS_MDNS_SERVICE_FILE=${THRURNDIS_MDNS_SERVICE_FILE:-/etc/avahi/services/thrurndis.service}
+THRURNDIS_MDNS_SERVICE_HASH=${THRURNDIS_MDNS_SERVICE_HASH:-/usr/local/libexec/thrurndis/mdns-service.sha256}
 THRURNDIS_MDNS_PID_FILE=${THRURNDIS_MDNS_PID_FILE:-/run/avahi-daemon/pid}
 THRURNDIS_MDNS_PROC_ROOT=${THRURNDIS_MDNS_PROC_ROOT:-/proc}
 THRURNDIS_MDNS_READY_ATTEMPTS=${THRURNDIS_MDNS_READY_ATTEMPTS:-6}
@@ -96,12 +98,26 @@ thrurndis_mdns_config_ready() {
         "use-ipv6=no" \
         "allow-interfaces=$RNDIS_IFACE" \
         "enable-dbus=no" \
+        "disable-publishing=no" \
         "publish-addresses=yes" \
         "publish-workstation=no" \
-        "publish-resolv-conf-dns-servers=no"; do
+        "publish-resolv-conf-dns-servers=no" \
+        "enable-reflector=no"; do
         $BB grep -F -x "$thrurndis_mdns_config_line" "$THRURNDIS_MDNS_CONFIG" \
             >/dev/null 2>&1 || return 1
     done
+}
+
+thrurndis_mdns_service_config_ready() {
+    [ -r "$THRURNDIS_MDNS_SERVICE_HASH" ] || return 1
+    [ -f "$THRURNDIS_MDNS_SERVICE_FILE" ] || return 1
+    thrurndis_mdns_expected_hash=$($BB cat "$THRURNDIS_MDNS_SERVICE_HASH") || return 1
+    [ "${#thrurndis_mdns_expected_hash}" -eq 64 ] || return 1
+    case "$thrurndis_mdns_expected_hash" in *[!0-9a-f]*) return 1 ;; esac
+    thrurndis_mdns_actual_hash=$(
+        $BB sha256sum "$THRURNDIS_MDNS_SERVICE_FILE" 2>/dev/null
+    ) || return 1
+    [ "${thrurndis_mdns_actual_hash%% *}" = "$thrurndis_mdns_expected_hash" ]
 }
 
 thrurndis_mdns_status() {
@@ -118,6 +134,10 @@ thrurndis_mdns_status() {
     fi
     if ! thrurndis_mdns_config_ready; then
         echo "Avahi configuration does not restrict $THRURNDIS_MDNS_FQDN to $RNDIS_IFACE IPv4"
+        return 1
+    fi
+    if ! thrurndis_mdns_service_config_ready; then
+        echo "ThruRNDIS DNS-SD service is missing or differs from the built configuration"
         return 1
     fi
 

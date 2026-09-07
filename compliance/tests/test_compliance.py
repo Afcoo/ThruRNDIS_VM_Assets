@@ -322,13 +322,25 @@ class ComplianceTests(unittest.TestCase):
                 "etc/init.d/rcS": (stat.S_IFREG | 0o755, b"#!/bin/sh\n"),
                 module_path: (stat.S_IFREG | 0o644, b"kernel module"),
             }
+            (repo / "script").mkdir(parents=True)
+            for source_name, installed_path in (
+                ("avahi-daemon.conf", "etc/avahi/avahi-daemon.conf"),
+                ("thrurndis.service", "etc/avahi/services/thrurndis.service"),
+            ):
+                content = (ROOT / "script" / source_name).read_bytes()
+                (repo / "script" / source_name).write_bytes(content)
+                init_files[installed_path] = (stat.S_IFREG | 0o644, content)
+            service_hash = sha256((repo / "script/thrurndis.service").read_bytes())
+            init_files["usr/local/libexec/thrurndis/mdns-service.sha256"] = (
+                stat.S_IFREG | 0o644, (service_hash + "\n").encode(),
+            )
             initramfs = assets / "initramfs-thrurndis-lts"
             initramfs.write_bytes(make_newc(init_files))
             image = assets / "Image-lts"
             image.write_bytes(b"Linux Image")
             file_map = {
                 path: {
-                    "owner": "kernel" if path == module_path else ("project" if path.startswith("etc/") else "busybox"),
+                    "owner": "kernel" if path == module_path else ("busybox" if path == "bin/busybox" else "project"),
                     "sha256": sha256(data),
                 }
                 for path, (_, data) in init_files.items()

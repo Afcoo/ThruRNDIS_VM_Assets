@@ -32,6 +32,7 @@ INITRAMFS_SCRIPTS = (
 )
 INITRAMFS_SOURCED_MODULES = ("port-forwarding", "mdns-advertising")
 AVAHI_CONFIG = SCRIPT_DIR / "avahi-daemon.conf"
+AVAHI_SERVICE = SCRIPT_DIR / "thrurndis.service"
 
 
 class GuestPathError(ValueError):
@@ -543,9 +544,10 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         add_file(root, destination, source.read_bytes(), 0o644, "project", owners)
     if not AVAHI_CONFIG.is_file():
         fail(f"Missing project Avahi configuration: {AVAHI_CONFIG}")
-    # The Alpine Avahi package ships example SSH/SFTP service records. This
-    # guest publishes only its address record and must not claim unavailable
-    # services, so retain an intentionally empty static-services directory.
+    if not AVAHI_SERVICE.is_file():
+        fail(f"Missing project DNS-SD service: {AVAHI_SERVICE}")
+    # Replace Alpine's example SSH/SFTP services with our address-discovery
+    # service. This does not advertise an application listener or a host port.
     avahi_services = root / "etc/avahi/services"
     if avahi_services.exists() or avahi_services.is_symlink():
         if avahi_services.is_dir() and not avahi_services.is_symlink():
@@ -553,6 +555,22 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         else:
             avahi_services.unlink()
     avahi_services.mkdir(parents=True, mode=0o755)
+    add_file(
+        root,
+        "etc/avahi/services/thrurndis.service",
+        AVAHI_SERVICE.read_bytes(),
+        0o644,
+        "project",
+        owners,
+    )
+    add_file(
+        root,
+        "usr/local/libexec/thrurndis/mdns-service.sha256",
+        hash_file(AVAHI_SERVICE) + "\n",
+        0o644,
+        "project",
+        owners,
+    )
     add_file(
         root,
         "etc/avahi/avahi-daemon.conf",

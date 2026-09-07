@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -10,20 +11,32 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = ROOT / "script/initramfs/mdns-advertising"
 CONFIG = ROOT / "script/avahi-daemon.conf"
+SERVICE = ROOT / "script/thrurndis.service"
 INIT_MDNS = ROOT / "script/initramfs/init-mdns"
 GATEWAY = ROOT / "script/initramfs/eth0-usb0-gateway"
 sys.path.insert(0, str(ROOT / "script/lib"))
+sys.path.insert(0, str(ROOT / "compliance"))
 
 import build_assets  # noqa: E402
+from common import CpioEntry, ComplianceError, read_newc  # noqa: E402
+from verify_compliance import verify_mdns_payload  # noqa: E402
 
 
 SHELL_HARNESS = r'''
-bb() { command "$@"; }
+bb() {
+    if [ "$1" = sha256sum ] && ! command -v sha256sum >/dev/null 2>&1; then
+        shift
+        shasum -a 256 "$@"
+    else
+        command "$@"
+    fi
+}
 BB=bb
 RNDIS_IFACE=usb0
 log_console() { printf 'log:%s\n' "$*" >&2; }
@@ -61,6 +74,10 @@ def run_module(
     runtime = root / "run"
     proc = root / "proc"
     calls = root / "calls"
+    service = root / "thrurndis.service"
+    service.write_bytes(SERVICE.read_bytes())
+    service_hash = root / "mdns-service.sha256"
+    service_hash.write_text(hashlib.sha256(service.read_bytes()).hexdigest() + "\n")
     pid = "4242"
     pid_dir = proc / pid
     (runtime / "avahi-daemon").mkdir(parents=True)
@@ -91,6 +108,8 @@ def run_module(
             "MOCK_AVAHI_CALLS": str(calls),
             "THRURNDIS_MDNS_AVAHI_DAEMON": str(daemon),
             "THRURNDIS_MDNS_CONFIG": str(CONFIG),
+            "THRURNDIS_MDNS_SERVICE_FILE": str(service),
+            "THRURNDIS_MDNS_SERVICE_HASH": str(service_hash),
             "THRURNDIS_MDNS_PID_FILE": str(runtime / "avahi-daemon/pid"),
             "THRURNDIS_MDNS_PROC_ROOT": str(proc),
             "THRURNDIS_MDNS_READY_ATTEMPTS": "1",
@@ -126,19 +145,30 @@ class MdnsAdvertisingTests(unittest.TestCase):
             installed_module = root / "usr/local/libexec/thrurndis/mdns-advertising"
             installed_init = root / "usr/local/sbin/init-mdns"
             installed_config = root / "etc/avahi/avahi-daemon.conf"
+            installed_service = example_services / "thrurndis.service"
+            installed_hash = root / "usr/local/libexec/thrurndis/mdns-service.sha256"
             self.assertEqual(installed_module.read_bytes(), MODULE.read_bytes())
             self.assertEqual(stat.S_IMODE(installed_module.stat().st_mode), 0o644)
             self.assertEqual(installed_init.read_bytes(), INIT_MDNS.read_bytes())
             self.assertEqual(stat.S_IMODE(installed_init.stat().st_mode), 0o755)
             self.assertEqual(installed_config.read_bytes(), CONFIG.read_bytes())
-            self.assertEqual(list(example_services.iterdir()), [])
+            self.assertEqual(list(example_services.iterdir()), [installed_service])
+            self.assertEqual(installed_service.read_bytes(), SERVICE.read_bytes())
+            self.assertEqual(stat.S_IMODE(installed_service.stat().st_mode), 0o644)
+            self.assertEqual(
+                installed_hash.read_text().strip(),
+                hashlib.sha256(installed_service.read_bytes()).hexdigest(),
+            )
             self.assertEqual((root / "var/run").readlink(), Path("/run"))
             self.assertIn(
                 "avahi:x:86:86:Avahi System User:/dev/null:/sbin/nologin",
                 (root / "etc/passwd").read_text(),
             )
             self.assertIn("avahi:x:86:", (root / "etc/group").read_text())
-            for installed in (installed_module, installed_init, installed_config):
+            for installed in (
+                installed_module, installed_init, installed_config,
+                installed_service, installed_hash,
+            ):
                 self.assertEqual(
                     owners[str(installed.relative_to(root))],
                     "project",
@@ -163,6 +193,63 @@ class MdnsAdvertisingTests(unittest.TestCase):
         self.assertIn('exec "$AVAHI_DAEMON" --file="$AVAHI_CONFIG"', init_text)
         self.assertNotIn("--daemonize", init_text)
         self.assertNotIn(" &", init_text)
+
+    def test_service_has_complete_ipv4_discovery_records(self) -> None:
+        group = ET.fromstring(SERVICE.read_bytes())
+        self.assertEqual(group.tag, "service-group")
+        self.assertEqual([child.tag for child in group], ["name", "service"])
+        self.assertEqual(group.findtext("name"), "ThruRNDIS")
+        service = group.find("service")
+        self.assertEqual(service.attrib, {"protocol": "ipv4"})
+        self.assertEqual(service.findtext("type"), "_thrurndis._tcp")
+        self.assertEqual(service.findtext("domain-name"), "local")
+        self.assertEqual(service.findtext("host-name"), "thrurndis.local")
+        self.assertEqual(service.findtext("port"), "0")
+        self.assertEqual(
+            [element.text for element in service.findall("txt-record")],
+            ["txtvers=1", "hostname=thrurndis.local", "discovery-only=1"],
+        )
+
+    def test_final_initramfs_enforces_service_allowlist_and_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "root"
+            build_assets.install_project_files(root, {})
+            archive = Path(temporary) / "initramfs.gz"
+            build_assets.write_initramfs(root, archive)
+            entries = read_newc(archive)
+        verify_mdns_payload(entries, ROOT)
+        service_path = "etc/avahi/services/thrurndis.service"
+        for mutation in (
+            [entry for entry in entries if entry.path != service_path],
+            entries + [CpioEntry("etc/avahi/services/ssh.service", stat.S_IFREG | 0o644, b"example")],
+            [CpioEntry(entry.path, entry.mode, b"modified")
+             if entry.path == service_path else entry for entry in entries],
+            [CpioEntry(entry.path, stat.S_IFLNK | 0o777, b"/other.service")
+             if entry.path == service_path else entry for entry in entries],
+            [CpioEntry(entry.path, entry.mode, b"0" * 64 + b"\n")
+             if entry.path.endswith("mdns-service.sha256") else entry for entry in entries],
+            [CpioEntry(entry.path, entry.mode, entry.data.replace(b"allow-interfaces=usb0", b"allow-interfaces=eth0"))
+             if entry.path.endswith("avahi-daemon.conf") else entry for entry in entries],
+        ):
+            with self.subTest(mutation=mutation[-1].path), self.assertRaises(ComplianceError):
+                verify_mdns_payload(mutation, ROOT)
+
+    def test_missing_or_modified_service_fails_closed(self) -> None:
+        for mutation in (
+            'rm "$THRURNDIS_MDNS_SERVICE_FILE"',
+            'printf "<invalid/>\\n" >"$THRURNDIS_MDNS_SERVICE_FILE"',
+            'rm "$THRURNDIS_MDNS_SERVICE_HASH"',
+            'printf "invalid\\n" >"$THRURNDIS_MDNS_SERVICE_HASH"',
+        ):
+            with self.subTest(mutation=mutation):
+                result, _root, temporary = run_module(
+                    mutation + '\nif thrurndis_mdns_status 192.168.42.2; then exit 10; fi\n'
+                )
+                try:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("DNS-SD service is missing or differs", result.stdout)
+                finally:
+                    temporary.cleanup()
 
     def test_configuration_publishes_only_usb0_ipv4(self) -> None:
         text = CONFIG.read_text()

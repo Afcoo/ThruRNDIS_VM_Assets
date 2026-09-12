@@ -1,0 +1,13 @@
+<?xml version="1.0" standalone="no"?>
+<!--
+SPDX-FileCopyrightText: 2026 Afcoo
+SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">%h (VNC)</name>
+  <service protocol="ipv4">
+    <type>_rfb._tcp</type>
+    <port>5900</port>
+  </service>
+</service-group>

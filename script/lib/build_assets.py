@@ -33,6 +33,7 @@ INITRAMFS_SCRIPTS = (
     "eth0-usb0-gateway", "init-mdns",
 )
 INITRAMFS_SOURCED_MODULES = ("port-forwarding",)
+AVAHI_SERVICES = ("vnc.service", "moonlight.service")
 
 
 class GuestPathError(ValueError):
@@ -577,8 +578,8 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
     add_file(root, "etc/resolv.conf", b"", 0o644, "project", owners)
     add_file(root, "etc/avahi/avahi-daemon.conf",
              (ROOT / "config/avahi-daemon.conf").read_bytes(), 0o644, "project", owners)
-    # The APK ships sample SSH/SFTP advertisements. This guest provides only
-    # address discovery; never announce services that the Mac may not run.
+    # Replace the APK's sample SSH/SFTP advertisements with the explicitly
+    # requested Mac service discovery records; keep this an exact allowlist.
     service_dir = root / "etc/avahi/services"
     if service_dir.exists():
         shutil.rmtree(service_dir)
@@ -586,6 +587,12 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         if relative.startswith("etc/avahi/services/"):
             del owners[relative]
     service_dir.mkdir(mode=0o755)
+    for name in AVAHI_SERVICES:
+        source = ROOT / "config/avahi-services" / name
+        if not source.is_file():
+            fail(f"Missing project Avahi service: {source}")
+        add_file(root, f"etc/avahi/services/{name}", source.read_bytes(),
+                 0o644, "project", owners)
     add_file(root, "etc/avahi/hosts", b"", 0o644, "project", owners)
     # APK maintainer scripts are deliberately not executed. Supply the account
     # needed by Avahi's privilege drop explicitly in this minimal guest root.

@@ -76,6 +76,37 @@ between interfaces, publish DNS servers, or announce SSH/SFTP services. UDP
 5353 is reserved for guest mDNS even when the requested forwarding range
 includes it; TCP 5353 and other selected TCP/UDP ports retain normal forwarding.
 
+Two repository-authored DNS-SD records also advertise the default Mac service
+endpoints on that same USB link:
+
+| Client | Discovery name | Service type | SRV port |
+| --- | --- | --- | --- |
+| AVNC / VNC | `thrurndis (VNC)` | `_rfb._tcp` | TCP 5900 |
+| Moonlight / Sunshine | `thrurndis (Moonlight)` | `_nvstream._tcp` | TCP 47989 |
+
+These types match the [AVNC discovery implementation](https://github.com/gujjwal00/avnc/blob/master/app/src/main/java/com/gaurav/avnc/viewmodel/service/Discovery.kt)
+and [Moonlight discovery implementation](https://github.com/moonlight-stream/moonlight-android/blob/master/app/src/main/java/com/limelight/nvstream/mdns/JmDNSDiscoveryAgent.java).
+Avahi generates the PTR, SRV and TXT records from `config/avahi-services/` and
+resolves their default SRV target through its live host A record. Both the
+instance names (`%h`) and SRV target follow any host-name conflict rename.
+No static IP address, credentials, pairing data or fabricated server metadata
+is included.
+
+The records are static advertisements: they do not test whether the Mac service
+is listening or whether its port is forwarded. Enable macOS Screen Sharing or
+another VNC server on TCP 5900 for AVNC. Run Sunshine on the Mac for Moonlight;
+47989 is its HTTP discovery/control endpoint, and streaming also needs the
+other [default Sunshine ports](https://docs.lizardbyte.dev/projects/sunshine/v0.23.0/about/advanced_usage.html#port).
+With both services using default ports, a combined boot configuration is:
+
+```text
+thrurndis.port_forward=5900,47984,47989,47998-48000,48010
+```
+
+The existing forwarding module applies the same port set to TCP and UDP.
+Custom VNC/Sunshine ports require corresponding changes to these service files
+and a rebuilt asset; the records do not configure or start the Mac servers.
+
 The Android resolver/application must send mDNS on the USB tethering link;
 support and interface selection vary by device and application. If it does not,
 use the live `THRURNDIS_RNDIS_IPV4` address directly. Avahi follows mDNS name
@@ -87,6 +118,9 @@ For device verification, enable forwarding for a listening Mac service, resolve
 `THRURNDIS_RNDIS_IPV4`. Connect to the service by name, then detach/reconnect USB
 and repeat after gateway readiness. Also check that a selected range containing
 5353 leaves mDNS working and that no AAAA or `eth0` address is advertised.
+In AVNC's discovery list, verify the VNC entry resolves to the live RNDIS
+address and port 5900. In Moonlight, verify the discovered host reaches the
+Mac's Sunshine endpoint on 47989, then test pairing and streaming.
 
 The machine-readable console contract is line-oriented:
 
@@ -130,7 +164,7 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
-| `::respawn` | `init-mdns` | Run the Avahi responder in the foreground as the dedicated `avahi` user; track live `usb0` addresses and advertise `thrurndis.local` only on the Android link. |
+| `::respawn` | `init-mdns` | Run the Avahi responder in the foreground as the dedicated `avahi` user; track live `usb0` addresses and advertise `thrurndis.local` plus default VNC/Moonlight DNS-SD records only on the Android link. |
 | sourced module | `port-forwarding` | Parse and validate the optional canonical port/range set from `/proc/cmdline`, prepare one shared TCP/UDP interval set plus rule fragments and marker state, and inspect exact installed state without mutating nftables. |
 | watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish the canonical RNDIS IPv4 plus readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |

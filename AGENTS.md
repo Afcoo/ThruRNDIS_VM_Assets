@@ -70,8 +70,14 @@ they are not host-side setup scripts and are not run by the macOS app.
   with its normal privilege drop to the dedicated `avahi` account. It advertises
   `thrurndis.local` using live `usb0` IPv4 addresses only. Avahi monitors late
   attachment, carrier and address changes, and reconnects. Do not add DHCP,
-  route or nftables mutations, a D-Bus daemon, an mDNS reflector, static service
-  advertisements, IPv6 records, or discovery on `eth0` to this action. Preserve
+  route or nftables mutations, a D-Bus daemon, an mDNS reflector, IPv6 records,
+  or discovery on `eth0` to this action. The only static service advertisements
+  are the repository-authored VNC (`_rfb._tcp`, TCP 5900) and Moonlight
+  (`_nvstream._tcp`, TCP 47989) records from `config/avahi-services/`, installed
+  by an explicit builder allowlist. Their SRV targets follow Avahi's live host
+  name; do not pin a guest address or import Alpine's sample SSH/SFTP services.
+  These records describe default Mac endpoints and do not enable forwarding,
+  start host services, or attest to their readiness. Preserve
   mDNS conflict handling and report name conflicts through the guest console.
 - `eth0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
   obtains `usb0` DHCP. Its policy route and nftables rules admit only fixed host

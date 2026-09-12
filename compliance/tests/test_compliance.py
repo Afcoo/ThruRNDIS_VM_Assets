@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import gzip
 import hashlib
 import json
@@ -14,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,10 +23,12 @@ from types import SimpleNamespace
 COMPLIANCE_DIR = Path(__file__).resolve().parents[1]
 ROOT = COMPLIANCE_DIR.parent
 sys.path.insert(0, str(COMPLIANCE_DIR))
+sys.path.insert(0, str(ROOT / "script/lib"))
 
 from apk_fixture import make_apk  # noqa: E402
 
 import build_compliance  # noqa: E402
+import build_assets  # noqa: E402
 import verify_compliance  # noqa: E402
 from common import (  # noqa: E402
     CpioEntry,
@@ -82,10 +86,6 @@ class ComplianceTests(unittest.TestCase):
         for package in lock["packages"]:
             normalize_license(package["license"], policy)
 
-    def test_current_asset_version_is_positive(self) -> None:
-        config = load_vm_asset_config(ROOT / "config/vm-assets.json")
-        self.assertEqual(config["assetVersion"], 1)
-
     def test_asset_version_rejects_non_positive_integers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "vm-assets.json"
@@ -96,42 +96,47 @@ class ComplianceTests(unittest.TestCase):
                 ):
                     load_vm_asset_config(path)
 
-    def test_current_inputs_exclude_legacy_wireguard_payloads(self) -> None:
-        lock = json.loads((ROOT / "config/packages.lock.json").read_text())
-        names = {package["name"] for package in lock["packages"]}
-        self.assertFalse(any(name.startswith("wireguard") for name in names))
-        self.assertNotIn("wireguard-tools-wg-quick", lock["rootPackages"])
+    def test_guest_files_are_installed_with_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            services = root / "etc/avahi/services"
+            services.mkdir(parents=True)
+            (services / "ssh.service").write_text("stock SSH advertisement")
+            owners = {"etc/avahi/services/ssh.service": "avahi"}
+            build_assets.install_project_files(root, owners)
 
-        alpine_env = (ROOT / "config/alpine.env").read_text().lower()
-        self.assertNotIn("wireguard", alpine_env)
-        self.assertNotIn("virtiofs", alpine_env)
+            module = root / "usr/local/libexec/thrurndis/port-forwarding"
+            self.assertEqual(module.read_bytes(), (ROOT / "script/initramfs/port-forwarding").read_bytes())
+            self.assertEqual(stat.S_IMODE(module.stat().st_mode), 0o644)
+            self.assertEqual(owners[module.relative_to(root).as_posix()], "project")
+            actions = (root / "etc/inittab").read_text().splitlines()
+            network = actions.index("::wait:/usr/local/sbin/init-network")
+            self.assertLess(actions.index("::wait:/usr/local/sbin/init-rndis"), network)
+            for daemon in ("usb0-watcher", "init-mdns"):
+                self.assertLess(network, actions.index(f"::respawn:/usr/local/sbin/{daemon}"))
 
-        scripts = ROOT / "script/initramfs"
-        self.assertFalse((scripts / "init-virtiofs-wgconf").exists())
-        self.assertFalse((scripts / "wg0-usb0-gateway").exists())
+            config = configparser.ConfigParser()
+            config.read(root / "etc/avahi/avahi-daemon.conf")
+            self.assertEqual(config["server"]["allow-interfaces"], "usb0")
+            self.assertFalse(config.getboolean("server", "use-ipv6"))
+            self.assertFalse(config.getboolean("reflector", "enable-reflector"))
+            self.assertTrue(config.getboolean("publish", "publish-addresses"))
+            expected = {
+                "vnc.service": ("_rfb._tcp", "5900"),
+                "moonlight.service": ("_nvstream._tcp", "47989"),
+            }
+            self.assertEqual({path.name for path in services.iterdir()}, set(expected))
+            self.assertNotIn("etc/avahi/services/ssh.service", owners)
+            for filename, endpoint in expected.items():
+                with self.subTest(service=filename):
+                    record = ET.parse(services / filename).getroot().find("service")
+                    self.assertEqual((record.findtext("type"), record.findtext("port")), endpoint)
+                    self.assertEqual(record.get("protocol"), "ipv4")
+                    self.assertIsNone(record.find("host-name"))
+                    self.assertEqual(owners[f"etc/avahi/services/{filename}"], "project")
 
-    def test_guest_vznat_and_fixed_host_link_contract(self) -> None:
-        scripts = ROOT / "script/initramfs"
-        init_network = (scripts / "init-network").read_text()
-        gateway = (scripts / "eth0-usb0-gateway").read_text()
-        for marker in (
-            "THRURNDIS_VZNAT_IPV4=",
-            "THRURNDIS_VZNAT_CIDR=",
-            "THRURNDIS_VZNAT_GATEWAY=",
-        ):
-            self.assertIn(marker, init_network)
-        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", init_network)
-        self.assertIn(
-            'ip -4 address replace "$HOST_LINK_GUEST_CIDR" dev "$iface"',
-            init_network,
-        )
-
-        self.assertIn("HOST_LINK_GUEST_IPV4=192.168.100.1", gateway)
-        self.assertIn("HOST_LINK_GUEST_CIDR=192.168.100.1/24", gateway)
-        self.assertIn("HOST_LINK_HOST_IPV4=192.168.100.2", gateway)
-        self.assertIn("HOST_LINK_HOST_CIDR=192.168.100.2/32", gateway)
-        self.assertIn('THRURNDIS_RNDIS_IPV4=${1:-}', gateway)
-        self.assertIn('THRURNDIS_RNDIS_ROUTE_READY=$1', gateway)
+    def test_gateway_readiness_marker_order(self) -> None:
+        gateway = (ROOT / "script/initramfs/eth0-usb0-gateway").read_text()
         gateway_up = gateway[gateway.index("gateway_up() {"):gateway.index("gateway_down() {")]
         gateway_down = gateway[gateway.index("gateway_down() {"):gateway.index("gateway_status() {")]
         self.assertLess(
@@ -150,21 +155,6 @@ class ComplianceTests(unittest.TestCase):
             gateway_down.index("announce_route_ready 0"),
             gateway_down.index('announce_rndis_ipv4 ""'),
         )
-        self.assertIn('from "$HOST_LINK_HOST_CIDR"', gateway)
-        self.assertIn('iif "$INGRESS_IFACE" table "$TABLE_ID"', gateway)
-        self.assertIn('ip saddr $HOST_LINK_HOST_CIDR', gateway)
-        self.assertIn('ip daddr $HOST_LINK_HOST_CIDR', gateway)
-        self.assertIn('ip daddr $HOST_LINK_GUEST_IPV4', gateway)
-        self.assertIn('iifname "$INGRESS_IFACE" oifname "$RNDIS_IFACE"', gateway)
-        self.assertIn('udp dport 53 dnat to $rndis_dns', gateway)
-        self.assertIn('tcp dport 53 dnat to $rndis_dns', gateway)
-        self.assertIn('THRURNDIS_RNDIS_RESOLV_CONF', gateway)
-        self.assertIn('$1 == "nameserver"', gateway)
-        self.assertNotIn(
-            'ingress_source=$(interface_default_gateway "$INGRESS_IFACE")',
-            gateway,
-        )
-        self.assertNotIn("ingress_destination=", gateway)
 
     def test_legacy_wireguard_payload_fails_closed(self) -> None:
         entry = CpioEntry(

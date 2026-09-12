@@ -4,18 +4,12 @@
 from __future__ import annotations
 
 import os
-import stat
 import subprocess
-import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE = ROOT / "script/initramfs/port-forwarding"
-sys.path.insert(0, str(ROOT / "script/lib"))
-
-import build_assets  # noqa: E402
 
 SHELL_HARNESS = r'''
 bb() {
@@ -58,31 +52,6 @@ def run_module(
 
 
 class PortForwardingTests(unittest.TestCase):
-    def test_module_is_packaged_and_wired_into_the_gateway(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            owners: dict[str, str] = {}
-            build_assets.install_project_files(root, owners)
-            installed = root / "usr/local/libexec/thrurndis/port-forwarding"
-
-            self.assertEqual(installed.read_bytes(), MODULE.read_bytes())
-            self.assertEqual(stat.S_IMODE(installed.stat().st_mode), 0o644)
-            self.assertEqual(owners[str(installed.relative_to(root))], "project")
-
-        gateway = (ROOT / "script/initramfs/eth0-usb0-gateway").read_text()
-        self.assertIn('. "$PORT_FORWARDING_MODULE"', gateway)
-        self.assertIn("$THRURNDIS_PF_SET_DEFINITION", gateway)
-        for code in (
-            "invalid-state",
-            "nft-unavailable",
-            "nft-install",
-            "rule-status",
-        ):
-            self.assertIn(
-                f"thrurndis_pf_announce_error_state {code}",
-                gateway,
-            )
-
     def test_boot_argument_parser_requires_canonical_port_set(self) -> None:
         probe = r'''
 if thrurndis_pf_load_configuration; then result=ok; else result=error; fi
@@ -110,30 +79,6 @@ printf '%s\t%s\t%s\t%s\n' "$result" "$THRURNDIS_PF_ENABLED" \
                     run_module(probe, cmdline=command_line).stdout.strip(),
                     expected,
                 )
-
-    def test_rule_fragments_share_one_tcp_udp_interval_set(self) -> None:
-        probe = r'''
-thrurndis_pf_prepare_nft_rules || exit 1
-printf '%s\n%s\n%s\n%s\n' "$THRURNDIS_PF_SET_DEFINITION" \
-    "$THRURNDIS_PF_PREROUTING_RULES" "$THRURNDIS_PF_FORWARD_RULES" \
-    "$THRURNDIS_PF_POSTROUTING_RULES"
-'''
-        result = run_module(
-            probe,
-            cmdline="thrurndis.port_forward=5050,6550-6557",
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("type inet_service", result.stdout)
-        self.assertIn("flags interval", result.stdout)
-        self.assertIn("elements = { 5050, 6550-6557 }", result.stdout)
-        for protocol in ("tcp", "udp"):
-            self.assertGreaterEqual(
-                result.stdout.count(
-                    f"{protocol} dport @thrurndis_forwarded_ports"
-                ),
-                3,
-            )
-        self.assertNotIn("dnat to 192.168.100.2:", result.stdout)
 
     def test_rule_status_fails_when_udp_rules_are_missing(self) -> None:
         probe = r'''

@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+set -eu
+
+# Avahi stays in the foreground so BusyBox init owns and respawns it. Its
+# netlink monitor handles late usb0 attachment, lease changes and disconnects;
+# this action must not wait for USB or acquire another DHCP lease.
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export PATH
+
+# /run is mounted as tmpfs by rcS, hiding any directory in the APK payload.
+mkdir -p /run/avahi-daemon
+chmod 0755 /run/avahi-daemon
+
+# Keep Avahi's normal privilege drop to the dedicated avahi account. The RAM
+# root needs no chroot helper, D-Bus daemon, OpenRC service or daemonization.
+exec /usr/sbin/avahi-daemon --no-chroot --file=/etc/avahi/avahi-daemon.conf

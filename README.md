@@ -58,6 +58,36 @@ includes them in its single owned `thrurndis` nftables transaction. DNAT
 changes only the destination address to `192.168.100.2`, preserving the
 original destination port. The value is immutable for that VM boot.
 
+### Android access through `thrurndis.local`
+
+The BusyBox `init-mdns` respawn action runs Avahi in the foreground and
+advertises `thrurndis.local` on `usb0` using its current DHCP IPv4 address.
+From the connected Android device, an mDNS-capable application can open, for
+example, `http://thrurndis.local:5050` when port 5050 is forwarded and the Mac
+service listens on its host-link address or all interfaces. The name points
+to the guest's RNDIS address; existing DNAT/SNAT rules deliver those connections
+to `192.168.100.2` on the same port. Name resolution alone does not indicate
+that forwarding or the Mac service is ready.
+
+Avahi tracks late USB attachment, address changes, carrier loss, and reconnects
+without acquiring DHCP or changing routing. Discovery is IPv4-only and limited
+to `usb0`; the guest does not advertise VZNAT/host-link addresses, relay mDNS
+between interfaces, publish DNS servers, or announce SSH/SFTP services. UDP
+5353 is reserved for guest mDNS even when the requested forwarding range
+includes it; TCP 5353 and other selected TCP/UDP ports retain normal forwarding.
+
+The Android resolver/application must send mDNS on the USB tethering link;
+support and interface selection vary by device and application. If it does not,
+use the live `THRURNDIS_RNDIS_IPV4` address directly. Avahi follows mDNS name
+conflict handling: if another device already owns `thrurndis.local` on that
+link, it chooses a suffixed name and logs the conflict on the guest console.
+
+For device verification, enable forwarding for a listening Mac service, resolve
+`thrurndis.local` on the Android USB link, and compare its A record with
+`THRURNDIS_RNDIS_IPV4`. Connect to the service by name, then detach/reconnect USB
+and repeat after gateway readiness. Also check that a selected range containing
+5353 leaves mDNS working and that no AAAA or `eth0` address is advertised.
+
 The machine-readable console contract is line-oriented:
 
 ```text
@@ -100,6 +130,7 @@ the initramfs; the macOS app does not execute them on the host.
 | `::wait` | `init-rndis` | Load the XHCI, USB networking, and RNDIS host modules, then rescan devices before later network stages. |
 | `::wait` | `init-network` | Configure the VZNAT NIC `eth0` with DHCP, report its runtime IPv4, CIDR, and gateway markers for bridge discovery, and add the fixed secondary host-link address `192.168.100.1/24`. |
 | `::respawn` | `usb0-watcher` | Watch the fixed RNDIS interface `usb0`, retry gateway setup when it appears or becomes incomplete, and clear stale state when it disappears. |
+| `::respawn` | `init-mdns` | Run the Avahi responder in the foreground as the dedicated `avahi` user; track live `usb0` addresses and advertise `thrurndis.local` only on the Android link. |
 | sourced module | `port-forwarding` | Parse and validate the optional canonical port/range set from `/proc/cmdline`, prepare one shared TCP/UDP interval set plus rule fragments and marker state, and inspect exact installed state without mutating nftables. |
 | watcher helper | `eth0-usb0-gateway` | Source the port-forwarding module, clear stale VZNAT DNS, acquire `usb0` DHCP so BusyBox atomically writes RNDIS DNS, route only `192.168.100.2/32` arriving on `eth0` through the RNDIS gateway, enable IPv4 forwarding, proxy `192.168.100.1:53` UDP/TCP DNS to RNDIS DNS, apply the complete owned nftables table in one transaction, and publish the canonical RNDIS IPv4 plus readiness changes. |
 | `hvc0::respawn` | `init-console` | Attach a login shell to the virtio console and restore it after the shell exits. |

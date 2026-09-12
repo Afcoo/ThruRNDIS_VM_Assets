@@ -265,6 +265,8 @@ jobs:
           fi
 
           grep -Fq "thrurndis-rcS: early boot setup finished" build/qemu-smoke.log
+          grep -Fq "Successfully dropped root privileges." build/qemu-smoke.log
+          grep -Fq "Server startup complete. Host name is thrurndis.local." build/qemu-smoke.log
 
           python3 - <<'PY'
           import json

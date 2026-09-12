@@ -214,6 +214,10 @@ nft() {
                             printf '%s\n' "$THRURNDIS_PF_PREROUTING_RULES" |
                                 "$BB" sed 's/dnat to 192\.168\.100\.2/dnat to 192.168.100.2:5050/g'
                             ;;
+                        mdns-exclusion)
+                            printf '%s\n' "$THRURNDIS_PF_PREROUTING_RULES" |
+                                "$BB" sed 's/ udp dport != 5353//g'
+                            ;;
                         *) printf '%s\n' "$THRURNDIS_PF_PREROUTING_RULES" ;;
                     esac
                     ;;
@@ -242,6 +246,7 @@ thrurndis_pf_rules_ready
         expected_errors = {
             "prerouting-address": "without port translation",
             "prerouting-port": "without port translation",
+            "mdns-exclusion": "missing UDP mDNS exclusion",
             "forward-address": "missing tcp forward allow",
             "postrouting-address": "missing tcp SNAT",
         }

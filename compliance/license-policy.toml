@@ -9,6 +9,7 @@ project_copyright = "Copyright (C) 2026 Afcoo"
 # dependency update which introduces a different license intentionally fails
 # until the policy and the generated notices are reviewed together.
 allowed_licenses = [
+  "AFL-2.1",
   "Apache-2.0",
   "BSD-2-Clause",
   "BSD-3-Clause",
@@ -38,3 +39,6 @@ source_license_patterns = ["COPYING*", "COPYRIGHT*", "LICENSE*", "LICENCE*", "NO
 [origin_license_files]
 # zlib carries its license grant in README rather than a LICENSE/COPYING file.
 zlib = ["README"]
+# Alpine applies this upstream relicensing patch to the LGPL-era tarball.
+# Preserve the MIT grant as well as the original source license evidence.
+libdaemon = ["0001-LICENSE-change-license-to-MIT.patch"]

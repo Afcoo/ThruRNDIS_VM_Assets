@@ -48,6 +48,23 @@ Every binary distribution contains:
 An SBOM, package URL, Alpine ISO, or GitHub's automatic source archive is not a
 substitute for corresponding source.
 
+The mDNS responder adds Alpine's `avahi` runtime closure. Avahi is declared
+`LGPL-2.1-or-later`; its linked `dbus-libs` package declares
+`AFL-2.1 OR GPL-2.0-or-later`, even though the guest disables the D-Bus API
+and does not run a D-Bus daemon. The reviewed D-Bus 1.16.2 `COPYING` confirms
+that choice and references `LICENSES/AFL-2.1.txt` and
+`LICENSES/GPL-2.0-or-later.txt` in the corresponding-source archive. The source
+tarball was checked against the SHA-512 in the locked aports recipe at
+`0dac2d7bf76016e3bb78ccc734edbb157a1d4b51`. The policy preserves the upstream
+expression and both license texts; it does not relabel the aggregate archive.
+
+Alpine's `libdaemon` uses a legacy LGPL source tarball plus the upstream
+`0001-LICENSE-change-license-to-MIT.patch` at locked aports commit
+`f8d62aa6b1bf91ade408013dde5995156561903c`. Both distfile and patch checksums
+were verified. The license evidence policy explicitly includes that patch,
+so the MIT grant and copyright notices are preserved alongside the original
+tarball's license text rather than showing only the obsolete LGPL grant.
+
 ## Corresponding source
 
 Each published `vm_assets.zip` is accompanied in the same GitHub Release by

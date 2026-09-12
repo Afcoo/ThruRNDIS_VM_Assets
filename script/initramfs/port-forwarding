@@ -167,8 +167,11 @@ thrurndis_pf_prepare_nft_rules() {
         flags interval
         elements = { $THRURNDIS_PF_NFT_ELEMENTS }
     }"
+    # UDP 5353 belongs to the guest mDNS responder, including unicast queries
+    # and conflict detection replies. A broad forwarded range must not DNAT
+    # those packets to the Mac. TCP 5353 remains available for forwarding.
     THRURNDIS_PF_PREROUTING_RULES="iifname \"$RNDIS_IFACE\" tcp dport @$THRURNDIS_PF_SET_NAME counter dnat to $HOST_LINK_HOST_IPV4
-        iifname \"$RNDIS_IFACE\" udp dport @$THRURNDIS_PF_SET_NAME counter dnat to $HOST_LINK_HOST_IPV4"
+        iifname \"$RNDIS_IFACE\" udp dport @$THRURNDIS_PF_SET_NAME udp dport != 5353 counter dnat to $HOST_LINK_HOST_IPV4"
     THRURNDIS_PF_FORWARD_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport @$THRURNDIS_PF_SET_NAME ct state new,established counter accept
         iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 udp dport @$THRURNDIS_PF_SET_NAME ct state new,established counter accept"
     THRURNDIS_PF_POSTROUTING_RULES="iifname \"$RNDIS_IFACE\" oifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_HOST_IPV4 tcp dport @$THRURNDIS_PF_SET_NAME counter snat to $HOST_LINK_GUEST_IPV4
@@ -266,6 +269,13 @@ thrurndis_pf_rules_ready() {
             "$BB" grep -v -F "dnat to $HOST_LINK_HOST_IPV4:" \
                 >/dev/null 2>&1; then
             echo "missing $thrurndis_pf_protocol DNAT to $HOST_LINK_HOST_IPV4 without port translation"
+            thrurndis_pf_failures=1
+        fi
+        if [ "$thrurndis_pf_protocol" = udp ] && ! nft list chain ip "$NFT_TABLE" prerouting 2>/dev/null |
+            "$BB" grep -F "iifname \"$RNDIS_IFACE\"" |
+            "$BB" grep -F "udp dport @$THRURNDIS_PF_SET_NAME udp dport != 5353" |
+            "$BB" grep -F -w "dnat to $HOST_LINK_HOST_IPV4" >/dev/null 2>&1; then
+            echo "missing UDP mDNS exclusion from port forwarding"
             thrurndis_pf_failures=1
         fi
         if ! nft list chain ip "$NFT_TABLE" forward 2>/dev/null |

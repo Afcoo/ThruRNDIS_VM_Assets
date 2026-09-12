@@ -66,6 +66,13 @@ they are not host-side setup scripts and are not run by the macOS app.
   gateway setup when the interface appears or its state becomes incomplete,
   and clears stale gateway state when the interface disappears. It must remain
   tolerant of late USB attachment, detach, and reconnect.
+- `init-mdns` (`::respawn`) runs the locked Avahi daemon in the foreground,
+  with its normal privilege drop to the dedicated `avahi` account. It advertises
+  `thrurndis.local` using live `usb0` IPv4 addresses only. Avahi monitors late
+  attachment, carrier and address changes, and reconnects. Do not add DHCP,
+  route or nftables mutations, a D-Bus daemon, an mDNS reflector, static service
+  advertisements, IPv6 records, or discovery on `eth0` to this action. Preserve
+  mDNS conflict handling and report name conflicts through the guest console.
 - `eth0-usb0-gateway` is the watcher's `up`, `down`, and `status` helper. It
   obtains `usb0` DHCP. Its policy route and nftables rules admit only fixed host
   source `192.168.100.2/32` arriving on `eth0`, then forward it through the
@@ -96,6 +103,10 @@ they are not host-side setup scripts and are not run by the macOS app.
   `pending:<ports>`, `active:<ports>`, or
   `error:<code>` on the system console. Changing the mapping requires a new VM
   boot.
+- UDP 5353 is reserved for the guest mDNS responder, including multicast and
+  unicast mDNS traffic. The port-forwarding module must exclude it from UDP
+  DNAT even when it appears in the immutable port set; TCP 5353 remains
+  forwardable. Include this exclusion in the exact installed-state checks.
 - `eth0-usb0-gateway` remains the sole owner and mutator of the complete
   `thrurndis` nftables table. The sourced module must never invoke `nft` for
   mutation or install its rules in a separate transaction.

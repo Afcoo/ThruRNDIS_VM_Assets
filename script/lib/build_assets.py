@@ -30,7 +30,7 @@ DEFAULT_CONFIG = ROOT / "config/alpine.env"
 DEFAULT_LOCK = ROOT / "config/packages.lock.json"
 INITRAMFS_SCRIPTS = (
     "rcS", "init-console", "init-rndis", "init-network", "usb0-watcher",
-    "eth0-usb0-gateway",
+    "eth0-usb0-gateway", "init-mdns",
 )
 INITRAMFS_SOURCED_MODULES = ("port-forwarding",)
 
@@ -541,6 +541,7 @@ def write_inittab(root: pathlib.Path, owners: dict[str, str]) -> None:
 ::wait:/usr/local/sbin/init-rndis
 ::wait:/usr/local/sbin/init-network
 ::respawn:/usr/local/sbin/usb0-watcher
+::respawn:/usr/local/sbin/init-mdns
 hvc0::respawn:/usr/local/sbin/init-console
 ::restart:/sbin/init
 ::ctrlaltdel:/bin/umount -a -r
@@ -550,7 +551,8 @@ hvc0::respawn:/usr/local/sbin/init-console
 def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
     for directory, mode in (
         ("bin", 0o755), ("sbin", 0o755), ("dev", 0o755),
-        ("etc/init.d", 0o755), ("root", 0o700), ("run", 0o755),
+        ("etc/init.d", 0o755), ("etc/avahi", 0o755),
+        ("root", 0o700), ("run", 0o755),
         ("tmp", 0o1777), ("usr/local/libexec/thrurndis", 0o755),
         ("usr/local/sbin", 0o755), ("var/log", 0o755),
     ):
@@ -558,6 +560,7 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         path.mkdir(parents=True, exist_ok=True)
         path.chmod(mode)
     add_symlink(root, "init", "/sbin/init", "project", owners)
+    add_symlink(root, "var/run", "/run", "project", owners)
     write_inittab(root, owners)
     for name in INITRAMFS_SCRIPTS:
         source = SCRIPT_DIR / "initramfs" / name
@@ -572,6 +575,27 @@ def install_project_files(root: pathlib.Path, owners: dict[str, str]) -> None:
         destination = f"usr/local/libexec/thrurndis/{name}"
         add_file(root, destination, source.read_bytes(), 0o644, "project", owners)
     add_file(root, "etc/resolv.conf", b"", 0o644, "project", owners)
+    add_file(root, "etc/avahi/avahi-daemon.conf",
+             (ROOT / "config/avahi-daemon.conf").read_bytes(), 0o644, "project", owners)
+    # The APK ships sample SSH/SFTP advertisements. This guest provides only
+    # address discovery; never announce services that the Mac may not run.
+    service_dir = root / "etc/avahi/services"
+    if service_dir.exists():
+        shutil.rmtree(service_dir)
+    for relative in list(owners):
+        if relative.startswith("etc/avahi/services/"):
+            del owners[relative]
+    service_dir.mkdir(mode=0o755)
+    add_file(root, "etc/avahi/hosts", b"", 0o644, "project", owners)
+    # APK maintainer scripts are deliberately not executed. Supply the account
+    # needed by Avahi's privilege drop explicitly in this minimal guest root.
+    add_file(root, "etc/passwd",
+             "root:x:0:0:root:/root:/bin/sh\n"
+             "avahi:x:86:86:Avahi:/run/avahi-daemon:/sbin/nologin\n",
+             0o644, "project", owners)
+    add_file(root, "etc/group", "root:x:0:\navahi:x:86:\n", 0o644, "project", owners)
+    add_file(root, "etc/shadow", "root:!:0:0:99999:7:::\navahi:!:0:0:99999:7:::\n",
+             0o600, "project", owners)
 
 
 def cpio_header(
@@ -732,7 +756,7 @@ def main() -> int:
             fail(f"Firmware payloads are forbidden in the initramfs: {forbidden_firmware}")
     required_commands = (
         "bin/sh", "usr/bin/busybox", "sbin/ip", "usr/sbin/nft",
-        "usr/bin/tcpdump",
+        "usr/bin/tcpdump", "usr/sbin/avahi-daemon",
     )
     for relative in required_commands:
         try:

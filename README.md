@@ -81,14 +81,15 @@ endpoints on that same USB link:
 
 | Client | Discovery name | Service type | SRV port |
 | --- | --- | --- | --- |
-| AVNC / VNC | `thrurndis (VNC)` | `_rfb._tcp` | TCP 5900 |
-| Moonlight / Sunshine | `thrurndis (Moonlight)` | `_nvstream._tcp` | TCP 47989 |
+| AVNC / VNC | `ThruRNDIS` | `_rfb._tcp` | TCP 5900 |
+| Moonlight / Sunshine | `ThruRNDIS` | `_nvstream._tcp` | TCP 47989 |
 
 These types match the [AVNC discovery implementation](https://github.com/gujjwal00/avnc/blob/master/app/src/main/java/com/gaurav/avnc/viewmodel/service/Discovery.kt)
 and [Moonlight discovery implementation](https://github.com/moonlight-stream/moonlight-android/blob/master/app/src/main/java/com/limelight/nvstream/mdns/JmDNSDiscoveryAgent.java).
 Avahi generates the PTR, SRV and TXT records from `config/avahi-services/` and
-resolves their default SRV target through its live host A record. Both the
-instance names (`%h`) and SRV target follow any host-name conflict rename.
+resolves their default SRV target through its live host A record. Both service
+instances use the display name `ThruRNDIS`; their SRV target follows Avahi's
+live host name, including host-name conflict renames.
 No static IP address, credentials, pairing data or fabricated server metadata
 is included.
 

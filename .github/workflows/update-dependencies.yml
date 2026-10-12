@@ -84,6 +84,9 @@ jobs:
           import sys
           from pathlib import Path
 
+          sys.path.insert(0, "script")
+          from release_notes import dependency_summary
+
           before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           after = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 
@@ -130,6 +133,7 @@ jobs:
           old_alpine = before["alpine"]
           new_alpine = after["alpine"]
           output = [
+              dependency_summary(before, after),
               "## Dependency and license diff",
               "",
               f"Alpine: {transition(old_alpine.get('version'), new_alpine.get('version'))}",

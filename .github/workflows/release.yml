@@ -18,7 +18,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
-      LEGACY_LATEST_TAG: alpine-3.24.1-r2
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -34,14 +33,6 @@ jobs:
         run: |
           set -euo pipefail
           release_commit=$(git rev-parse HEAD)
-
-          current_latest_tag=$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/latest" \
-            --jq '.tag_name')
-          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
-            echo "Expected legacy Latest $LEGACY_LATEST_TAG, got $current_latest_tag." >&2
-            exit 1
-          fi
 
           releases_json="$RUNNER_TEMP/releases.json"
           tags_json="$RUNNER_TEMP/tags.json"
@@ -319,18 +310,10 @@ jobs:
             cmp "$release_dir/$asset" "$readback/$asset"
           done
 
-          current_latest_tag=$(gh api \
-            "repos/$GITHUB_REPOSITORY/releases/latest" \
-            --jq '.tag_name')
-          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
-            echo "Expected legacy Latest $LEGACY_LATEST_TAG before publishing, got $current_latest_tag." >&2
-            exit 1
-          fi
-
           gh release edit "$RELEASE_TAG" \
             --draft=false \
             --prerelease=false \
-            --latest=false
+            --latest=true
           gh release view "$RELEASE_TAG" \
             --json body,isDraft,isPrerelease > "$release_json"
           jq --exit-status \
@@ -347,7 +330,7 @@ jobs:
           current_latest_tag=$(gh api \
             "repos/$GITHUB_REPOSITORY/releases/latest" \
             --jq '.tag_name')
-          if [[ $current_latest_tag != "$LEGACY_LATEST_TAG" ]]; then
-            echo "Expected legacy Latest $LEGACY_LATEST_TAG after publishing, got $current_latest_tag." >&2
+          if [[ $current_latest_tag != "$RELEASE_TAG" ]]; then
+            echo "Expected Latest $RELEASE_TAG after publishing, got $current_latest_tag." >&2
             exit 1
           fi

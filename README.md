@@ -229,9 +229,9 @@ Release only after every check passes:
 - `THIRD_PARTY_NOTICES.md`
 - `SHA256SUMS`
 
-Versioned VM asset Releases are published with `--latest=false`. The legacy
-`alpine-3.24.1-r2` Release remains GitHub Latest so ThruRNDIS v0.3.0 continues
-to resolve its unversioned assets through `/releases/latest`. New app versions
+Versioned VM asset Releases are published with `--latest=true`. After publishing,
+the workflow verifies that `/releases/latest` resolves to the newly published
+Release. Clients using that endpoint receive the new Release. New app versions
 list Releases and select only tags in their supported namespace, beginning
 with `V1-*`.
 

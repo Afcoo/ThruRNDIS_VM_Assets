@@ -155,8 +155,8 @@ alter the guest's main routing table.
   `vm-assets-v*` tags are separate namespaces and never contribute to the
   versioned revision number.
 - Publish versioned artifacts as formal, non-prerelease Releases with
-  `--latest=false`. Keep the legacy `alpine-3.24.1-r2` Release as GitHub Latest
-  for ThruRNDIS v0.3.0 clients that still request `/releases/latest`.
+  `--latest=true`. After publishing, require `/releases/latest` to resolve to
+  the newly published Release.
 - GitHub's automatically generated repository source archive is not a
   substitute for the third-party corresponding-source bundle.
 - Do not delete or replace a source bundle while its matching binary Release
@@ -225,9 +225,7 @@ alter the guest's main routing table.
 2. List all GitHub Releases, including drafts, and repository tags matching
    `V<assetVersion>-alpine-<ALPINE_VERSION>-r<N>`. Reject duplicate
    revision numbers, a tag without its corresponding Release, a Release without
-   its tag, or any malformed matching name. Separately require
-   `/releases/latest` to resolve to the published, non-prerelease legacy
-   `alpine-3.24.1-r2` Release.
+   its tag, or any malformed matching name.
 3. Calculate the expected next tag deterministically for review of the
    workflow's automatic selection:
    - If no Release exists for this asset-version namespace and the merged
@@ -254,8 +252,8 @@ alter the guest's main routing table.
 6. Independently read the final Release and require all of the following:
    - `targetCommitish` is the verified merged default-branch commit.
    - `isDraft` is `false`.
-   - `isPrerelease` is `false`, and the Release is not GitHub Latest.
-   - `/releases/latest` still resolves to `alpine-3.24.1-r2`.
+   - `isPrerelease` is `false`, and the Release is GitHub Latest.
+   - `/releases/latest` resolves to the newly published tag.
    - The asset allowlist contains exactly five non-empty files and no others:
      `vm_assets.zip`, `vm_assets-sources.tar.zst`, `sbom.spdx.json`,
      `THIRD_PARTY_NOTICES.md`, and `SHA256SUMS`.

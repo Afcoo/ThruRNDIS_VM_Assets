@@ -36,6 +36,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}", self.first_step)
         self.assertNotIn("uses:", self.first_step)
 
+    def test_manifest_update_is_an_independent_manual_workflow(self):
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        manifest = (ROOT / ".github/workflows/update-download-manifest.yml").read_text()
+        self.assertNotIn("update-download-manifest.yml", release)
+        self.assertNotIn("pull-requests: write", release)
+        self.assertIn("  workflow_dispatch:", manifest)
+        self.assertNotIn("workflow_call:", manifest)
+        self.assertNotIn("  schedule:", manifest)
+
     def test_main_branch_is_allowed(self):
         result = self.run_guard("refs/heads/main")
         self.assertEqual(result.returncode, 0, result.stderr)

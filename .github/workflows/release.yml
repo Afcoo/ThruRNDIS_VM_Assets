@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: release-vm-assets
@@ -18,8 +17,6 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
-    outputs:
-      asset_version: ${{ steps.selection.outputs.VM_ASSET_VERSION }}
     env:
       GH_TOKEN: ${{ github.token }}
 
@@ -43,7 +40,6 @@ jobs:
           persist-credentials: false
 
       - name: Select and validate release tag
-        id: selection
         shell: bash
         run: |
           set -euo pipefail
@@ -66,7 +62,6 @@ jobs:
             --tags-json "$tags_json")
           printf '%s\n' "$selection"
           printf '%s\n' "$selection" >> "$GITHUB_ENV"
-          printf '%s\n' "$selection" >> "$GITHUB_OUTPUT"
 
       - name: Ensure draft Release at the checked-out commit
         shell: bash
@@ -350,9 +345,3 @@ jobs:
             echo "Expected Latest $RELEASE_TAG after publishing, got $current_latest_tag." >&2
             exit 1
           fi
-
-  update-download-manifest:
-    needs: release
-    uses: ./.github/workflows/update-download-manifest.yml
-    with:
-      asset_version: ${{ needs.release.outputs.asset_version }}

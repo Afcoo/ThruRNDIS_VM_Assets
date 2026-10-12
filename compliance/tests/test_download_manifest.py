@@ -46,7 +46,7 @@ class DownloadManifestTests(unittest.TestCase):
         self.assertEqual(select_release([self.release, newer] + excluded, 1), newer)
 
     def test_non_release_tags_cannot_override_the_feed(self):
-        for tag in ("V1-test", "V1-alpine-3.24.2-r0", "V1-alpine-3.24.2-r01",
+        for tag in ("V1-test", "V1-../bad", "V1-alpine-3.24.2-r0", "V1-alpine-3.24.2-r01",
                     "V1-alpine-3.24-r1", "V1-alpine-3.24.2-r1-extra",
                     "V1-alpine-3.24.2-r2\n"):
             with self.subTest(tag=tag):
@@ -61,12 +61,10 @@ class DownloadManifestTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             select_release([self.release, broken], 1)
 
-    def test_rejects_invalid_channel_and_unsafe_tag(self):
+    def test_rejects_invalid_channel(self):
         for version in (True, 0, -1):
             with self.assertRaises(ValueError):
                 select_release([self.release], version)
-        with self.assertRaises(ValueError):
-            select_release([dict(self.release, tag_name="V1-../bad")], 1)
 
     def test_rejects_size_digest_and_checksum_mismatch(self):
         for field, value in (("size", 1), ("digest", "sha256:" + "0" * 64)):

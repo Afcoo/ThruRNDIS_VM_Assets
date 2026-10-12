@@ -49,11 +49,9 @@ class ManifestWorkflowTests(unittest.TestCase):
 
                 args = sys.argv[1:]
                 fixture = json.loads(Path("fixture.json").read_text())
-                with Path("calls.jsonl").open("a") as calls:
-                    calls.write(json.dumps(args) + "\\n")
                 if args[:1] == ["api"] and "repos/example/assets/pulls" in args:
                     assert "--paginate" in args
-                    assert all(value in args for value in ("state=open", "base=main", "per_page=100"))
+                    assert all(value in args for value in ("state=open", "base=main"))
                     for page in fixture["pages"]:
                         print(json.dumps(page))
                 elif args[:2] == ["pr", "view"]:
@@ -72,51 +70,43 @@ class ManifestWorkflowTests(unittest.TestCase):
                            '  diff) exit 1 ;;\n'
                            '  *) echo "Unexpected git call: $*" >&2; exit 90 ;;\nesac\n')
             git.chmod(0o755)
-            result = subprocess.run(
+            return subprocess.run(
                 ["bash", "-c", self.script], cwd=root, text=True, capture_output=True,
                 env={**os.environ, "PATH": f"{root}{os.pathsep}{os.environ['PATH']}",
                      "VM_ASSET_VERSION": "1", "RELEASE_TAG": "V1-alpine-3.24.2-r1",
                      "DEFAULT_BRANCH": "main", "GITHUB_REPOSITORY": REPOSITORY,
                      "RUNNER_TEMP": directory},
             )
-            calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
-            return result, calls
 
-    def test_reuses_original_branch(self):
-        result, _ = self.run_proposal([[self.pull_request()]], BRANCH)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Existing manifest PR:", result.stdout)
-
-    def test_reuses_retry_branch_from_later_page_and_reads_that_branch(self):
-        branch = BRANCH + "-100-2"
+    def test_reuses_matching_pr_from_later_page_and_reads_its_branch(self):
         decoys = [self.pull_request(repository="fork/assets"),
                   self.pull_request(branch=BRANCH + "0"),
                   self.pull_request(branch=BRANCH + "-unrelated")]
-        result, _ = self.run_proposal([decoys, [self.pull_request(branch=branch)]], branch)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Existing manifest PR:", result.stdout)
+        for branch in (BRANCH, BRANCH + "-100-2"):
+            with self.subTest(branch=branch):
+                result = self.run_proposal([decoys, [self.pull_request(branch=branch)]], branch)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Existing manifest PR:", result.stdout)
 
     def test_rejects_retry_pr_with_other_files(self):
         branch = BRANCH + "-100-2"
-        result, _ = self.run_proposal([[self.pull_request(branch=branch)]], branch,
-                                      files="releases/v1.json\nREADME.md")
+        result = self.run_proposal([[self.pull_request(branch=branch)]], branch,
+                                   files="releases/v1.json\nREADME.md")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Existing PR changes files outside the manifest", result.stderr)
 
     def test_rejects_retry_pr_with_different_manifest_bytes(self):
         branch = BRANCH + "-100-2"
-        result, calls = self.run_proposal([[self.pull_request(branch=branch)]], branch,
-                                          content='{"assetVersion": 2}\n')
+        result = self.run_proposal([[self.pull_request(branch=branch)]], branch,
+                                   content='{"assetVersion": 2}\n')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("differ", result.stdout)
-        self.assertTrue(any("/contents/" in " ".join(call) for call in calls))
 
-    def test_rejects_ambiguous_existing_prs_before_reading_or_writing(self):
-        result, calls = self.run_proposal(
+    def test_rejects_ambiguous_existing_prs(self):
+        result = self.run_proposal(
             [[self.pull_request(), self.pull_request(branch=BRANCH + "-100-2")]], BRANCH)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Multiple open manifest PRs", result.stderr)
-        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

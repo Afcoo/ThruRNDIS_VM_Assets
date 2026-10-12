@@ -229,6 +229,15 @@ Release only after every check passes:
 - `THIRD_PARTY_NOTICES.md`
 - `SHA256SUMS`
 
+Release notes show the locked kernel version and a package table with previous
+and new versions, additions, removals, and metadata-only changes. The baseline
+is the most recently published formal versioned Release (including older Alpine
+or asset versions), excluding drafts and prereleases. If none exists, the legacy
+`alpine-3.24.1-r2` Release is used; without either, all locked packages are listed
+as the initial inventory. The baseline tag is named in the notes, and its checked-in
+lock is required. The update PR includes the same readable summary against its
+pre-update lock, followed by the full license and provenance diff.
+
 Versioned VM asset Releases are published with `--latest=false`. The legacy
 `alpine-3.24.1-r2` Release remains GitHub Latest so ThruRNDIS v0.3.0 continues
 to resolve its unversioned assets through `/releases/latest`. New app versions

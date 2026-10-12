@@ -165,9 +165,10 @@ alter the guest's main routing table.
   and `sha256`; download URLs follow the fixed repository/tag/filename contract.
   Never include API object IDs or an additional checksum download in the feed.
 - `Update download manifest` is an independent, manual-only workflow. It selects
-  the newest `created_at` among published, non-prerelease Releases in the
-  requested asset namespace. It validates the five distribution attachments
-  and downloads the ZIP and `SHA256SUMS` again. It
+  the newest `created_at` among published, non-prerelease Releases whose full
+  tag matches `V<assetVersion>-alpine-<major.minor.patch>-r<positive revision>`.
+  It validates the five distribution attachments and downloads the ZIP and
+  `SHA256SUMS` again. It
   checks byte size, archive hash, optional GitHub digest, and embedded asset
   version before opening a PR that changes only the corresponding JSON.
   The release workflow does not invoke it. Dispatch it separately when the app

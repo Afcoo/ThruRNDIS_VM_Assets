@@ -23,18 +23,17 @@ REQUIRED_ASSETS = {
 def select_release(releases: list[dict], asset_version: int) -> dict:
     if type(asset_version) is not int or asset_version < 1:
         raise ValueError("assetVersion must be a positive integer")
+    tag_pattern = re.compile(rf"V{asset_version}-alpine-[0-9]+\.[0-9]+\.[0-9]+-r[1-9][0-9]*")
     candidates = [
         release for release in releases
         if release.get("draft") is False and release.get("prerelease") is False
-        and release.get("tag_name", "").startswith(f"V{asset_version}-")
+        and tag_pattern.fullmatch(release.get("tag_name", ""))
     ]
     if not candidates:
         raise ValueError(f"No published V{asset_version} Release")
     release = max(candidates, key=lambda value: (
         datetime.fromisoformat(value["created_at"].replace("Z", "+00:00")), value["id"]
     ))
-    if not re.fullmatch(rf"V{asset_version}-[A-Za-z0-9][A-Za-z0-9._-]*", release["tag_name"]):
-        raise ValueError("Release tag is not a safe URL component")
     assets = release["assets"]
     if len(assets) != len(REQUIRED_ASSETS) or {item["name"] for item in assets} != REQUIRED_ASSETS:
         raise ValueError("Published Release must have exactly the five distribution assets")

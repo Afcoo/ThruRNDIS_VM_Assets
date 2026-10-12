@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Update download manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_version:
+        description: Asset version to refresh (empty uses config/vm-assets.json)
+        type: string
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-download-manifest
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      REQUESTED_ASSET_VERSION: ${{ inputs.asset_version }}
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Select the newest published compatible release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=${REQUESTED_ASSET_VERSION:-$(jq --exit-status --raw-output '.assetVersion' config/vm-assets.json)}
+          version=$(python3 -c 'import sys; print(int(sys.argv[1]))' "$version")
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq --slurp 'add // []' > "$RUNNER_TEMP/releases.json"
+          tag=$(python3 script/download_manifest.py select \
+            --asset-version "$version" --releases-json "$RUNNER_TEMP/releases.json")
+          printf 'VM_ASSET_VERSION=%s\nRELEASE_TAG=%s\n' "$version" "$tag" >> "$GITHUB_ENV"
+
+      - name: Download and verify the app archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --dir "$RUNNER_TEMP/download" \
+            --pattern vm_assets.zip --pattern SHA256SUMS
+          python3 script/download_manifest.py write \
+            --asset-version "$VM_ASSET_VERSION" \
+            --releases-json "$RUNNER_TEMP/releases.json" \
+            --download-dir "$RUNNER_TEMP/download" \
+            --output "releases/v$VM_ASSET_VERSION.json"
+
+      - name: Propose the verified manifest in a pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest_path="releases/v$VM_ASSET_VERSION.json"
+          if git cat-file -e "HEAD:$manifest_path" 2>/dev/null && git diff --quiet -- "$manifest_path"; then
+            echo "Download manifest is already current."
+            exit 0
+          fi
+          branch="automation/download-manifest-$RELEASE_TAG"
+          existing_pr_record=$(gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base="$DEFAULT_BRANCH" -f per_page=100 \
+            | jq --slurp --raw-output --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" '
+                add | map(select(.head.repo.full_name == $repo)
+                  | select(.head.ref == $branch or (.head.ref
+                    | startswith($branch + "-")
+                      and (ltrimstr($branch + "-") | test("^[0-9]+-[0-9]+$")))))
+                | if length > 1 then error("Multiple open manifest PRs for this release")
+                  else .[0] // empty | [.html_url, .head.ref] | @tsv end')
+          IFS=$'\t' read -r existing_pr existing_branch <<< "$existing_pr_record"
+          if [[ -n $existing_pr ]]; then
+            changed_paths=$(gh pr view "$existing_pr" --json files --jq '[.files[].path] | join("\n")')
+            [[ $changed_paths == "$manifest_path" ]] || {
+              echo "Existing PR changes files outside the manifest." >&2
+              exit 1
+            }
+            gh api "repos/$GITHUB_REPOSITORY/contents/$manifest_path?ref=$existing_branch" \
+              --jq '.content' | base64 --decode > "$RUNNER_TEMP/proposed-manifest.json"
+            cmp "$manifest_path" "$RUNNER_TEMP/proposed-manifest.json"
+            echo "Existing manifest PR: $existing_pr"
+            exit 0
+          fi
+          # Preserve a branch left by a closed PR or interrupted run; never force-push it.
+          if [[ -n $(git ls-remote --heads origin "refs/heads/$branch") ]]; then
+            branch="$branch-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          fi
+          git switch --create "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- "$manifest_path"
+          git commit -m "chore(release): update V$VM_ASSET_VERSION download manifest"
+          gh auth setup-git
+          git push --set-upstream origin "$branch"
+          printf '%s\n' \
+            "Updates the V$VM_ASSET_VERSION app download manifest to $RELEASE_TAG." \
+            "" \
+            "The published ZIP was downloaded again and its byte size, SHA256SUMS," \
+            "GitHub digest (when present), and embedded asset version were verified." \
+            "Apps discover this release only after this PR is merged." \
+            "Approve pending workflow runs if requested, and require verify before merging." \
+            "" \
+            "Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/manifest-pr.md"
+          gh pr create --base "$DEFAULT_BRANCH" --head "$branch" \
+            --title "chore(release): update V$VM_ASSET_VERSION download manifest" \
+            --body-file "$RUNNER_TEMP/manifest-pr.md"

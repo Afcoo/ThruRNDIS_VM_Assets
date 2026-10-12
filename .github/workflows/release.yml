@@ -21,6 +21,17 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
+      - name: Require default branch
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ $GITHUB_REF != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "::error::Releases must be dispatched from $DEFAULT_BRANCH (received $GITHUB_REF)." >&2
+            exit 1
+          fi
+
       - name: Check out default branch
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:

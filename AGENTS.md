@@ -136,6 +136,9 @@ alter the guest's main routing table.
 
 ## Release Rules
 
+- The release workflow rejects dispatches whose full ref is not
+  `refs/heads/<default branch>` in its first step, before checkout or any API
+  mutation. A tag with the same name as the default branch is also rejected.
 - Never publish a binary-only Release or distribute `vm_assets.zip` as part of
   an incomplete verification artifact set. A `Verify VM assets` run that
   distributes `vm_assets.zip` must expose exactly five independently
@@ -157,6 +160,32 @@ alter the guest's main routing table.
 - Publish versioned artifacts as formal, non-prerelease Releases with
   `--latest=true`. After publishing, require `/releases/latest` to resolve to
   the newly published Release.
+- The app's static download feed lives at `releases/v<assetVersion>.json` on
+  `main`. Its flat fields are `schemaVersion`, `assetVersion`, `tagName`, `size`,
+  and `sha256`; download URLs follow the fixed repository/tag/filename contract.
+  Never include API object IDs or an additional checksum download in the feed.
+- `Update download manifest` is an independent, manual-only workflow. It selects
+  the newest `created_at` among published, non-prerelease Releases whose full
+  tag matches `V<assetVersion>-alpine-<major.minor.patch>-r<positive revision>`.
+  It validates the five distribution attachments and downloads the ZIP and
+  `SHA256SUMS` again. It
+  checks byte size, archive hash, optional GitHub digest, and embedded asset
+  version before opening a PR that changes only the corresponding JSON.
+  The release workflow does not invoke it. Dispatch it separately when the app
+  feed should advance, or to retry a failed metadata update without creating
+  another Release.
+  Apps observe the new version only after the JSON PR is reviewed and merged;
+  an open PR for the same tag is reused after comparing its manifest bytes.
+  Approve bot-authored workflow runs if GitHub holds them for approval, then
+  require the existing `verify` check before merging the JSON PR.
+  Existing older asset-version feeds remain available when a new version ships.
+- Manifest PRs use ordinary branches and required checks; never force-push,
+  directly write protected main, auto-merge, or bypass protection. If proposing
+  the JSON update fails after a Release is published, preserve that Release and
+  retry only the manifest workflow. A release request alone does not authorize
+  dispatching the separate manifest workflow; its dispatch and PR merge require
+  the corresponding user authorization. A manifest-only request does not
+  authorize building or publishing a Release.
 - GitHub's automatically generated repository source archive is not a
   substitute for the third-party corresponding-source bundle.
 - Do not delete or replace a source bundle while its matching binary Release

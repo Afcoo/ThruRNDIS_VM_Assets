@@ -8,6 +8,7 @@ path = [
   "AGENTS.md",
   "config/packages.lock.json",
   "config/vm-assets.json",
+  "releases/*.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Afcoo"

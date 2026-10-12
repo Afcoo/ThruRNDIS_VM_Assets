@@ -136,6 +136,9 @@ alter the guest's main routing table.
 
 ## Release Rules
 
+- The release workflow rejects dispatches whose full ref is not
+  `refs/heads/<default branch>` in its first step, before checkout or any API
+  mutation. A tag with the same name as the default branch is also rejected.
 - Never publish a binary-only Release or distribute `vm_assets.zip` as part of
   an incomplete verification artifact set. A `Verify VM assets` run that
   distributes `vm_assets.zip` must expose exactly five independently

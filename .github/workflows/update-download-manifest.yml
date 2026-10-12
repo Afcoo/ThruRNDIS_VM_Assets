@@ -69,15 +69,23 @@ jobs:
             exit 0
           fi
           branch="automation/download-manifest-$RELEASE_TAG"
-          existing_pr=$(gh pr list --base "$DEFAULT_BRANCH" --head "$branch" --state open \
-            --json url,isCrossRepository --jq '[.[] | select(.isCrossRepository == false)] | .[0].url // empty')
+          existing_pr_record=$(gh api --paginate --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f base="$DEFAULT_BRANCH" -f per_page=100 \
+            | jq --slurp --raw-output --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" '
+                add | map(select(.head.repo.full_name == $repo)
+                  | select(.head.ref == $branch or (.head.ref
+                    | startswith($branch + "-")
+                      and (ltrimstr($branch + "-") | test("^[0-9]+-[0-9]+$")))))
+                | if length > 1 then error("Multiple open manifest PRs for this release")
+                  else .[0] // empty | [.html_url, .head.ref] | @tsv end')
+          IFS=$'\t' read -r existing_pr existing_branch <<< "$existing_pr_record"
           if [[ -n $existing_pr ]]; then
             changed_paths=$(gh pr view "$existing_pr" --json files --jq '[.files[].path] | join("\n")')
             [[ $changed_paths == "$manifest_path" ]] || {
               echo "Existing PR changes files outside the manifest." >&2
               exit 1
             }
-            gh api "repos/$GITHUB_REPOSITORY/contents/$manifest_path?ref=$branch" \
+            gh api "repos/$GITHUB_REPOSITORY/contents/$manifest_path?ref=$existing_branch" \
               --jq '.content' | base64 --decode > "$RUNNER_TEMP/proposed-manifest.json"
             cmp "$manifest_path" "$RUNNER_TEMP/proposed-manifest.json"
             echo "Existing manifest PR: $existing_pr"

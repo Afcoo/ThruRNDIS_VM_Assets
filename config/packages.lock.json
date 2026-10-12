@@ -1,16 +1,16 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "f53f026681f4669229100fb8c9287d425d20080b66f89bf02ecb68a1f21e67b5",
-      "main": "c6fa4452563a7ab7cfa66cbd0b225e7890708827f9bafbe638feed35e602f41b"
+      "community": "74ff3e83c634c919bec131fd27aa7abf2ee986046eefc09691b6e7e58d8ed17e",
+      "main": "3fde43dc10e3bf4e0900ddee9988c40c02881626050a872815d7c828d2e9308b"
     },
-    "aportsCommit": "0934530484bbcde7498e2c694c710a49616a450e",
+    "aportsCommit": "d9d560d5de74ff9a7a73f3c903d6f126a0bf3142",
     "arch": "aarch64",
     "branch": "v3.24",
     "flavor": "standard",
-    "isoSha256": "95eba9066d7920fe703dd62b8b8e7f38c45eba0bad225dbe2ccfb5b76cf5356d",
-    "isoUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.1-aarch64.iso",
-    "version": "3.24.1"
+    "isoSha256": "e078b567b4b283b629f4b8659bccc477a060a5521c4d933ecf9591a1df8ba48f",
+    "isoUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.2-aarch64.iso",
+    "version": "3.24.2"
   },
   "packages": [
     {
@@ -191,22 +191,22 @@
       "version": "2.78-r0"
     },
     {
-      "apkIndexChecksum": "Q1yBbnEKxht37PmWjI99NQMTTPTe0=",
-      "aportsCommit": "013edf8b29199933e8ea34dde460b5584b979042",
-      "datahash": "000bcacec6f69b40986ae86773ffa78555d343a0cda17b7303c1d6e0c15271e8",
+      "apkIndexChecksum": "Q1nd3DZ6uRv/vKf+I4jGECIMBUisw=",
+      "aportsCommit": "29b9ec24b1b5b39aeef51fa2a044210e2ec5258e",
+      "datahash": "bac215178133c0ab0a58fe5017198071934fff47c8e6823b7e48ef8127ffcf50",
       "dependencies": [
         "so:libc.musl-aarch64.so.1"
       ],
-      "file": "libcrypto3-3.5.8-r0.apk",
+      "file": "libcrypto3-3.5.9-r0.apk",
       "license": "Apache-2.0",
       "name": "libcrypto3",
       "origin": "openssl",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "runtime",
-      "sha256": "35b892813c23664a3592e4fc8c12a03538a22c579057655361c7043305272a9a",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.8-r0.apk",
-      "version": "3.5.8-r0"
+      "sha256": "2676a2b0b6e23ea2edccf3ee982b9842a665d52603d047de3d0a185dc316d983",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.9-r0.apk",
+      "version": "3.5.9-r0"
     },
     {
       "apkIndexChecksum": "Q1RCjq5C/BE4wYYYUjB33eFah9qj4=",
@@ -321,23 +321,23 @@
       "version": "1.8.13-r0"
     },
     {
-      "apkIndexChecksum": "Q1WLCQbInnsZot7GFh9EDfIZ+3jy8=",
-      "aportsCommit": "87fae211c5c9626ec3a67ccb6bfdd3e98f031b0b",
-      "datahash": "3cd642d62a4707eeb1063b921d9bdbe9616a85bebd5ce57a5ad6ec4331f58121",
+      "apkIndexChecksum": "Q1dby7KLM3CABr7/zqJOyJKL00EjI=",
+      "aportsCommit": "efc8ddbb20c827d2bd8223c19a2625e754e5cb3c",
+      "datahash": "b4ae15b805ade6891fe16c90fd2653ed3f017dc76bb622bb2861d28d9b68061c",
       "dependencies": [
         "initramfs-generator",
         "linux-firmware-any"
       ],
-      "file": "linux-lts-6.18.49-r0.apk",
+      "file": "linux-lts-6.18.56-r0.apk",
       "license": "GPL-2.0-only",
       "name": "linux-lts",
       "origin": "linux-lts",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "kernel",
-      "sha256": "ea8028c649ddebcfcc20f8204e1f0b4ce833c2fe1577e46dfc9ba136335e7e61",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.49-r0.apk",
-      "version": "6.18.49-r0"
+      "sha256": "795bcd49840be7f4ff9566f5f669201bd41202376a455b720a98eb814f0e72f8",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.56-r0.apk",
+      "version": "6.18.56-r0"
     },
     {
       "apkIndexChecksum": "Q1JNQts+O/Z+jaJ4QHLMXQ5svftIU=",
@@ -435,22 +435,22 @@
       "version": "4.99.6-r1"
     },
     {
-      "apkIndexChecksum": "Q1qeG8MrsxW/2sYiT5J4Xk2aM0vyk=",
-      "aportsCommit": "f248b33b5943c7dc69bf691031d7612ab2e8ed93",
-      "datahash": "43b94541d31345adf9ef49d5bce92b2ed04ec834356435bf0d3023fc73985641",
+      "apkIndexChecksum": "Q1jP3JcWVZiDTJ6FovhLCh8M8Qt1I=",
+      "aportsCommit": "0afa2da0e8c8051c6f8f64a7a388e5a259904245",
+      "datahash": "d48cc0fb28fae23350212a59eb9cdb83922a5d15ebb7a272880a5c021af6cd45",
       "dependencies": [
         "so:libc.musl-aarch64.so.1"
       ],
-      "file": "zlib-1.3.2-r0.apk",
+      "file": "zlib-1.3.2-r1.apk",
       "license": "Zlib",
       "name": "zlib",
       "origin": "zlib",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "runtime",
-      "sha256": "a535991af7c9e8369ebbf33c1e388c1bc63c87ead5142eddaee71f65836c33e3",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zlib-1.3.2-r0.apk",
-      "version": "1.3.2-r0"
+      "sha256": "1f77a542ac6634761b9fe38d8bdca19b154071dcfa25432e73f2bc8a0740a33f",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zlib-1.3.2-r1.apk",
+      "version": "1.3.2-r1"
     },
     {
       "apkIndexChecksum": "Q1UrGFE6B78rsNBjRohoH37c42uco=",

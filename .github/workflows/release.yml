@@ -57,14 +57,14 @@ jobs:
         run: |
           release_commit=$(git rev-parse HEAD)
 
-          printf '%s\n' \
-            "ThruRNDIS VM assets for the locked Alpine inputs at ${release_commit}." \
-            "" \
-            "VM asset version: ${VM_ASSET_VERSION}." \
-            "" \
-            "The binary is a multi-license aggregate. Download vm_assets-sources.tar.zst," \
-            "THIRD_PARTY_NOTICES.md, and sbom.spdx.json with vm_assets.zip." \
+          python3 script/release_notes.py \
+            --lock config/packages.lock.json \
+            --releases-json "$RUNNER_TEMP/releases.json" \
+            --release-tag "$RELEASE_TAG" \
+            --release-commit "$release_commit" \
+            --asset-version "$VM_ASSET_VERSION" \
             > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
 
           if is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null); then
             [[ $is_draft == true ]] || {

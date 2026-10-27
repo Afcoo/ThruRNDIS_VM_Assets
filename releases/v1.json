@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "assetVersion": 1,
-  "tagName": "V1-alpine-3.24.2-r1",
-  "size": 20402290,
-  "sha256": "e6e5acb69e1f271e8e86ad332773c9dbfd163e0f1d54e95c5da4178c05a4cd7c"
+  "tagName": "V1-alpine-3.24.3-r1",
+  "size": 20415429,
+  "sha256": "84df1c9ec3b126629ecef1c8a6eb2f7bc57d8e583af9f4d2ff81172e031aee18"
 }

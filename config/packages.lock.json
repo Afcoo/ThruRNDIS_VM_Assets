@@ -1,16 +1,16 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "74ff3e83c634c919bec131fd27aa7abf2ee986046eefc09691b6e7e58d8ed17e",
-      "main": "3fde43dc10e3bf4e0900ddee9988c40c02881626050a872815d7c828d2e9308b"
+      "community": "5fc2a00c8fe47f33dcbbc0aaee3f05ebff15510fd5611f2f1532773fb37f07e8",
+      "main": "a018728f34dee4c814edb14fef1eafecc600d515252805ff120d69d32c0df47a"
     },
-    "aportsCommit": "d9d560d5de74ff9a7a73f3c903d6f126a0bf3142",
+    "aportsCommit": "ee92350c8a4509152dc91c693814215a884c07c3",
     "arch": "aarch64",
     "branch": "v3.24",
     "flavor": "standard",
-    "isoSha256": "e078b567b4b283b629f4b8659bccc477a060a5521c4d933ecf9591a1df8ba48f",
-    "isoUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.2-aarch64.iso",
-    "version": "3.24.2"
+    "isoSha256": "d4438d8973b7a4c50a2ee25d1555c537c1e6e91e25db28b7b683aa79c9ddba8f",
+    "isoUrl": "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-standard-3.24.3-aarch64.iso",
+    "version": "3.24.3"
   },
   "packages": [
     {
@@ -321,39 +321,39 @@
       "version": "1.8.13-r0"
     },
     {
-      "apkIndexChecksum": "Q1dby7KLM3CABr7/zqJOyJKL00EjI=",
-      "aportsCommit": "efc8ddbb20c827d2bd8223c19a2625e754e5cb3c",
-      "datahash": "b4ae15b805ade6891fe16c90fd2653ed3f017dc76bb622bb2861d28d9b68061c",
+      "apkIndexChecksum": "Q1MUAyx84mxP/Dlxyz1e/qpiTvsd0=",
+      "aportsCommit": "5fe63f789de75f6a71001cf2de771f922bedd0d2",
+      "datahash": "500e47a6540d2d46fe52729cc8c00ab1bb03b787c87a68579031d83126bc1831",
       "dependencies": [
         "initramfs-generator",
         "linux-firmware-any"
       ],
-      "file": "linux-lts-6.18.56-r0.apk",
+      "file": "linux-lts-6.18.58-r0.apk",
       "license": "GPL-2.0-only",
       "name": "linux-lts",
       "origin": "linux-lts",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "kernel",
-      "sha256": "795bcd49840be7f4ff9566f5f669201bd41202376a455b720a98eb814f0e72f8",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.56-r0.apk",
-      "version": "6.18.56-r0"
+      "sha256": "65ab581dd6773e2b1b6831dac50142518b2f2083668f164f68ebfcd00d1763c4",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.58-r0.apk",
+      "version": "6.18.58-r0"
     },
     {
-      "apkIndexChecksum": "Q1JNQts+O/Z+jaJ4QHLMXQ5svftIU=",
-      "aportsCommit": "f5640d3a10f664c9119720c60515265d3d6f6d01",
-      "datahash": "bdf59e919031242f2cdf96ea84180fd309de5e66821cc80103b6109164d7c2be",
+      "apkIndexChecksum": "Q1LxWdAiUjx6a3hymmYymFy3cU++Y=",
+      "aportsCommit": "8f79d39391b46d6dbf1800fb68b8212a21d5ee2e",
+      "datahash": "a923bd7f48b2a5d9aa9a3c51158bf967c36403dce1045e8eab148da096fa4981",
       "dependencies": [],
-      "file": "musl-1.2.6-r2.apk",
+      "file": "musl-1.2.6-r3.apk",
       "license": "MIT",
       "name": "musl",
       "origin": "musl",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "runtime",
-      "sha256": "5e9674b7f41152fe2119093b5cb4c13eaaadb19c2d5422b2d7267913e663ee6e",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/musl-1.2.6-r2.apk",
-      "version": "1.2.6-r2"
+      "sha256": "2e17864102278d9049c3a56f1bceed9e8cf287065617e579325123443daed8a5",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/musl-1.2.6-r3.apk",
+      "version": "1.2.6-r3"
     },
     {
       "apkIndexChecksum": "Q1/MzFElM7Tf9vRK02sG+bQ+iEjR8=",

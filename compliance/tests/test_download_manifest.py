@@ -13,7 +13,7 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "script"))
-from download_manifest import REQUIRED_ASSETS, build_manifest, select_release
+from download_manifest import REQUIRED_ASSETS, build_manifest, select_release, verify_manifest
 
 
 class DownloadManifestTests(unittest.TestCase):
@@ -87,6 +87,39 @@ class DownloadManifestTests(unittest.TestCase):
         next(a for a in self.release["assets"] if a["name"] == "SHA256SUMS")["size"] = checksums.stat().st_size
         with self.assertRaises(ValueError):
             build_manifest(self.release, 2, self.directory)
+
+    def test_verifies_submitted_manifest_without_rewriting(self):
+        path = self.directory / "v1.json"
+        manifest = build_manifest(self.release, 1, self.directory)
+        original = json.dumps(manifest, sort_keys=True).encode()
+        path.write_bytes(original)
+        verify_manifest(path, self.release, 1, self.directory)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_rejects_stale_or_tampered_manifest_fields(self):
+        path = self.directory / "v1.json"
+        manifest = build_manifest(self.release, 1, self.directory)
+        for field, value in (("schemaVersion", True), ("assetVersion", 2),
+                             ("size", float(manifest["size"])), ("size", 1),
+                             ("sha256", "0" * 64), ("tagName", "V1-alpine-3.24.1-r1")):
+            with self.subTest(field=field, value=value):
+                path.write_text(json.dumps(dict(manifest, **{field: value})))
+                original = path.read_bytes()
+                with self.assertRaisesRegex(ValueError, field):
+                    verify_manifest(path, self.release, 1, self.directory)
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_rejects_missing_extra_duplicate_and_non_object_fields(self):
+        path = self.directory / "v1.json"
+        manifest = build_manifest(self.release, 1, self.directory)
+        bodies = [json.dumps(dict(manifest, url="https://example.invalid")),
+                  json.dumps({k: v for k, v in manifest.items() if k != "sha256"}),
+                  json.dumps(manifest)[:-1] + ', "assetVersion": 1}', "[]"]
+        for body in bodies:
+            with self.subTest(body=body):
+                path.write_text(body)
+                with self.assertRaises(ValueError):
+                    verify_manifest(path, self.release, 1, self.directory)
 
 
 if __name__ == "__main__":

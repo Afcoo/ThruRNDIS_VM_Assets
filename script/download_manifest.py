@@ -83,6 +83,25 @@ def build_manifest(release: dict, asset_version: int, directory: Path) -> dict:
     }
 
 
+def verify_manifest(path: Path, release: dict, asset_version: int, directory: Path) -> None:
+    """Compare the submitted feed with freshly verified bytes; never rewrite it."""
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate manifest field: {key}")
+            result[key] = value
+        return result
+
+    manifest = json.loads(path.read_text(), object_pairs_hook=unique_fields)
+    expected = build_manifest(release, asset_version, directory)
+    if not isinstance(manifest, dict) or manifest.keys() != expected.keys():
+        raise ValueError(f"Invalid download manifest fields: {path}")
+    for field, value in expected.items():
+        if type(manifest[field]) is not type(value) or manifest[field] != value:
+            raise ValueError(f"Download manifest {field} mismatch: {path}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("select", "write"))

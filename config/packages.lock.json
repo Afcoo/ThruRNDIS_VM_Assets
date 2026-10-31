@@ -1,8 +1,8 @@
 {
   "alpine": {
     "apkIndexSha256": {
-      "community": "5fc2a00c8fe47f33dcbbc0aaee3f05ebff15510fd5611f2f1532773fb37f07e8",
-      "main": "a018728f34dee4c814edb14fef1eafecc600d515252805ff120d69d32c0df47a"
+      "community": "d42e4f504a07738bb7507cc76badb6a5c083eeb7839cc7b7c60cf57910b65e9d",
+      "main": "67c8311434a125b5d2d6e017265e088cda6a5e0eeb59e28316348ca038edf91e"
     },
     "aportsCommit": "ee92350c8a4509152dc91c693814215a884c07c3",
     "arch": "aarch64",
@@ -321,23 +321,23 @@
       "version": "1.8.13-r0"
     },
     {
-      "apkIndexChecksum": "Q1MUAyx84mxP/Dlxyz1e/qpiTvsd0=",
-      "aportsCommit": "5fe63f789de75f6a71001cf2de771f922bedd0d2",
-      "datahash": "500e47a6540d2d46fe52729cc8c00ab1bb03b787c87a68579031d83126bc1831",
+      "apkIndexChecksum": "Q1y/YfRJHSyVhVQDx7KP+n1/xIvwY=",
+      "aportsCommit": "36d3ca8442f7d978ad15bf4be74b7a4ff7bf815e",
+      "datahash": "9aff3d5c3ae71a730c07af2e646358e90bab21b37a99110ea6ab93a185d494c5",
       "dependencies": [
         "initramfs-generator",
         "linux-firmware-any"
       ],
-      "file": "linux-lts-6.18.58-r0.apk",
+      "file": "linux-lts-6.18.59-r0.apk",
       "license": "GPL-2.0-only",
       "name": "linux-lts",
       "origin": "linux-lts",
       "repository": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64",
       "repositoryName": "main",
       "role": "kernel",
-      "sha256": "65ab581dd6773e2b1b6831dac50142518b2f2083668f164f68ebfcd00d1763c4",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.58-r0.apk",
-      "version": "6.18.58-r0"
+      "sha256": "f6387970517083d5f08abacbf81baf1d70e1baa8fe4c2783469f45bb0751075c",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/linux-lts-6.18.59-r0.apk",
+      "version": "6.18.59-r0"
     },
     {
       "apkIndexChecksum": "Q1LxWdAiUjx6a3hymmYymFy3cU++Y=",

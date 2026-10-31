@@ -74,7 +74,9 @@ def verification_plan(event_name: str, event: dict) -> dict:
 
 
 def verify_downloads(paths: list[str], repository: str) -> None:
-    if not paths or any(not MANIFEST_PATH.fullmatch(path) for path in paths):
+    if not isinstance(paths, list) or not paths or any(
+        not isinstance(path, str) or not MANIFEST_PATH.fullmatch(path) for path in paths
+    ):
         raise ValueError("Expected changed releases/v<positive integer>.json paths")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Expected an owner/repository name")
@@ -101,20 +103,26 @@ def verify_downloads(paths: list[str], repository: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "verify"))
-    parser.add_argument("--plan", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--plan", type=Path)
+    source.add_argument("--manifests-json", help="Changed paths passed by the calling workflow")
     args = parser.parse_args()
     try:
         if args.command == "plan":
+            if args.plan is None:
+                parser.error("plan requires --plan")
             plan = verification_plan(os.environ["GITHUB_EVENT_NAME"],
                                      json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text()))
             args.plan.write_text(json.dumps(plan) + "\n")
             with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
                 output.write(f"build_required={str(plan['build_required']).lower()}\n")
                 output.write(f"manifest_changed={str(bool(plan['manifests'])).lower()}\n")
+                output.write(f"manifests={json.dumps(plan['manifests'])}\n")
             print(json.dumps(plan))
         else:
-            plan = json.loads(args.plan.read_text())
-            verify_downloads(plan["manifests"], os.environ["GITHUB_REPOSITORY"])
+            paths = (json.loads(args.manifests_json) if args.manifests_json is not None
+                     else json.loads(args.plan.read_text())["manifests"])
+            verify_downloads(paths, os.environ["GITHUB_REPOSITORY"])
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError,
             zipfile.BadZipFile) as error:
         parser.error(str(error))

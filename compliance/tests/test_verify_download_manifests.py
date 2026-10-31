@@ -131,7 +131,8 @@ class VerificationPlanTests(unittest.TestCase):
                    "plan", "--plan", str(plan)]
         result = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(output.read_text(), "build_required=false\nmanifest_changed=true\n")
+        self.assertEqual(output.read_text(), 'build_required=false\nmanifest_changed=true\n'
+                         'manifests=["releases/v1.json"]\n')
         output.write_text("")
         event.write_text("{}")
         result = subprocess.run(command, env=env, capture_output=True, text=True)
@@ -140,6 +141,13 @@ class VerificationPlanTests(unittest.TestCase):
 
 
 class PublishedManifestTests(unittest.TestCase):
+    def test_rejects_invalid_workflow_inputs_before_calling_github(self):
+        with patch("verify_download_manifests.subprocess.check_output") as api:
+            for paths in ([], None, {}, "releases/v1.json", [1], ["../releases/v1.json"]):
+                with self.subTest(paths=paths), self.assertRaises(ValueError):
+                    verify_downloads(paths, "example/assets")
+            api.assert_not_called()
+
     def test_paginated_release_download_and_submitted_hash_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

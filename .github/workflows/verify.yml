@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Afcoo
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-name: Verify VM assets
+name: Verify changes
 
 on:
   push:
@@ -16,10 +16,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
+  changes:
+    name: Classify changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-
+    timeout-minutes: 5
+    outputs:
+      build_required: ${{ steps.changes.outputs.build_required }}
+      manifest_changed: ${{ steps.changes.outputs.manifest_changed }}
+      manifests: ${{ steps.changes.outputs.manifests }}
     steps:
       - name: Check out repository
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
@@ -31,181 +35,56 @@ jobs:
         id: changes
         run: python3 script/verify_download_manifests.py plan --plan "$RUNNER_TEMP/verification-plan.json"
 
-      - name: Verify changed download manifests against published assets
-        if: steps.changes.outputs.manifest_changed == 'true'
+  vm-assets:
+    name: Verify VM assets
+    needs: changes
+    if: needs.changes.outputs.build_required == 'true'
+    uses: ./.github/workflows/verify-vm-assets.yml
+
+  download-manifests:
+    name: Verify download manifests
+    needs: changes
+    if: needs.changes.outputs.manifest_changed == 'true'
+    uses: ./.github/workflows/verify-download-manifests.yml
+    with:
+      manifests: ${{ needs.changes.outputs.manifests }}
+
+  # Keep the branch-protection check stable. An expected skip is allowed, but
+  # failed classification or a failed/cancelled/missing required job is not.
+  verify:
+    if: always()
+    needs: [changes, vm-assets, download-manifests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all selected verifications to pass
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 script/verify_download_manifests.py verify --plan "$RUNNER_TEMP/verification-plan.json"
-
-      - name: Install build and verification tools
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            ca-certificates cpio curl file git jq kmod libarchive-tools pipx \
-            python3 python3-venv qemu-system-arm rsync shellcheck squashfs-tools unzip \
-            xz-utils zip zstd
-          docker version
-
-      - name: Check source and license metadata
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          shellcheck --severity=warning \
-            script/make_vm_assets \
-            script/make_source_bundle \
-            script/initramfs/*
-          pipx run --spec 'reuse==5.1.1' reuse lint
-          python3 -m compileall -q compliance script
-          ./script/make_vm_assets --self-test
-          python3 script/update_dependencies.py --self-test
-          python3 -m unittest discover -s compliance/tests -v
-
-      - name: Build locked VM assets
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          ./script/make_vm_assets \
-            --config config/alpine.env \
-            --lock config/packages.lock.json \
-            --output build
-
-      - name: Build corresponding-source archive
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          ./script/make_source_bundle \
-            --lock config/packages.lock.json \
-            --build-dir build \
-            --output build/release/vm_assets-sources.tar.zst
-
-      - name: Build compliance payload and binary archive
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          python3 compliance/build_compliance.py \
-            --lock config/packages.lock.json \
-            --build-dir build \
-            --asset-dir build/assets
-
-      - name: Verify distribution and corresponding source
-        if: steps.changes.outputs.build_required == 'true'
-        run: |
-          python3 compliance/verify_compliance.py \
-            --lock config/packages.lock.json \
-            --build-dir build \
-            --asset-dir build/assets \
-            --source-bundle build/release/vm_assets-sources.tar.zst
-
-      - name: Smoke-test aarch64 boot
-        if: steps.changes.outputs.build_required == 'true'
-        shell: bash
-        run: |
-          set -o pipefail
-          set +e
-          timeout --signal=TERM 45s qemu-system-aarch64 \
-            -machine virt \
-            -cpu cortex-a57 \
-            -smp 2 \
-            -m 512M \
-            -nographic \
-            -no-reboot \
-            -nic none \
-            -kernel build/assets/Image-lts \
-            -initrd build/assets/initramfs-thrurndis-lts \
-            -append "console=ttyAMA0 rdinit=/sbin/init panic=-1" \
-            2>&1 | tee build/qemu-smoke.log
-          qemu_status=${PIPESTATUS[0]}
-          set -e
-
-          if [[ $qemu_status -ne 0 && $qemu_status -ne 124 ]]; then
-            echo "QEMU exited unexpectedly with status $qemu_status" >&2
-            exit "$qemu_status"
-          fi
-
-          grep -Fq "thrurndis-rcS: early boot setup finished" build/qemu-smoke.log
-
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          lock = json.loads(Path("config/packages.lock.json").read_text())
-          kernel = next(package for package in lock["packages"] if package.get("role") == "kernel")
-          release = kernel["version"].replace("-r", "-") + "-lts"
-          log = Path("build/qemu-smoke.log").read_text(errors="replace")
-          if f"Linux version {release} " not in log:
-              raise SystemExit(f"QEMU did not boot the locked kernel {release}")
-          print(f"Verified booted kernel: {release}")
-          PY
-
-      - name: Confirm build did not change tracked inputs
-        run: git diff --exit-code
-
-      - name: Prepare independently downloadable verification artifacts
-        if: steps.changes.outputs.build_required == 'true'
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BUILD_REQUIRED: ${{ needs.changes.outputs.build_required }}
+          MANIFEST_CHANGED: ${{ needs.changes.outputs.manifest_changed }}
+          VM_RESULT: ${{ needs.vm-assets.result }}
+          MANIFEST_RESULT: ${{ needs.download-manifests.result }}
         shell: bash
         run: |
           set -euo pipefail
-          artifact_dir=build/verification-artifact
-          install -d "$artifact_dir"
-          install -m 0644 \
-            build/release/vm_assets.zip \
-            build/release/vm_assets-sources.tar.zst \
-            build/assets/compliance/sbom.spdx.json \
-            build/assets/compliance/THIRD_PARTY_NOTICES.md \
-            "$artifact_dir/"
-
-          (
-            cd "$artifact_dir"
-            sha256sum \
-              vm_assets.zip \
-              vm_assets-sources.tar.zst \
-              sbom.spdx.json \
-              THIRD_PARTY_NOTICES.md \
-              > SHA256SUMS
-            sha256sum --check SHA256SUMS
-          )
-
-      # Raw single-file uploads keep each public filename as its artifact name.
-      - name: Upload corresponding-source archive
-        if: steps.changes.outputs.build_required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          path: build/verification-artifact/vm_assets-sources.tar.zst
-          if-no-files-found: error
-          retention-days: 7
-          archive: false
-
-      - name: Upload SPDX SBOM
-        if: steps.changes.outputs.build_required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          path: build/verification-artifact/sbom.spdx.json
-          if-no-files-found: error
-          retention-days: 7
-          archive: false
-
-      - name: Upload third-party notices
-        if: steps.changes.outputs.build_required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          path: build/verification-artifact/THIRD_PARTY_NOTICES.md
-          if-no-files-found: error
-          retention-days: 7
-          archive: false
-
-      - name: Upload verification checksums
-        if: steps.changes.outputs.build_required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          path: build/verification-artifact/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 7
-          archive: false
-
-      # Upload the binary last so a failed companion upload cannot leave a
-      # binary-only verification artifact set behind.
-      - name: Upload VM assets binary archive
-        if: steps.changes.outputs.build_required == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          path: build/verification-artifact/vm_assets.zip
-          if-no-files-found: error
-          retention-days: 7
-          archive: false
+          [[ "$CHANGES_RESULT" == success ]] || {
+            echo "Change classification did not succeed: $CHANGES_RESULT" >&2
+            exit 1
+          }
+          [[ "$BUILD_REQUIRED" == true || "$MANIFEST_CHANGED" == true ]] || {
+            echo "No verification was selected" >&2
+            exit 1
+          }
+          require_result() {
+            local required=$1 result=$2 label=$3
+            if [[ "$required" == true && "$result" == success ]] || \
+               [[ "$required" == false && "$result" == skipped ]]; then
+              printf '%s: %s\n' "$label" "$result"
+            else
+              printf '%s did not meet its verification requirement (required=%s, result=%s)\n' \
+                "$label" "$required" "$result" >&2
+              exit 1
+            fi
+          }
+          require_result "$BUILD_REQUIRED" "$VM_RESULT" "VM assets"
+          require_result "$MANIFEST_CHANGED" "$MANIFEST_RESULT" "Download manifests"

@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+name: Verify download manifests
+
+on:
+  workflow_call:
+    inputs:
+      manifests:
+        description: JSON array of changed download manifest paths
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  download-manifests:
+    name: Download manifests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Verify changed download manifests against published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_PATHS: ${{ inputs.manifests }}
+        run: python3 script/verify_download_manifests.py verify --manifests-json "$MANIFEST_PATHS"
+
+      - name: Confirm verification did not change tracked inputs
+        run: git diff --exit-code

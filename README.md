@@ -202,9 +202,23 @@ new package versions.
 
 ## Verification and releases
 
-The required **Verify VM assets** check (`verify`) runs for every push, pull
-request, and manual dispatch. For pull requests it compares the merge base to
-the PR head; for existing-branch pushes it compares the before and after trees.
+**Verify changes** (`verify.yml`) runs for every push, pull request, and manual
+dispatch. Its classification job compares the merge base to the PR head, or
+the before and after trees for existing-branch pushes, then calls separate
+reusable workflows on independent runners:
+
+- **Verify VM assets** (`verify-vm-assets.yml`): full build, source/license and
+  compliance verification, QEMU boot test, and five-artifact upload.
+- **Verify download manifests** (`verify-download-manifests.yml`): validation
+  of changed download feeds against published Release assets.
+
+The child workflows use `workflow_call` and are selected by the parent; they
+do not independently trigger duplicate push or PR runs. Their results appear
+as separate checks. The final required `verify` job always evaluates their
+results and accepts only success for selected checks and skips for unselected
+checks. Classification failure, missing outputs, cancellation, or an unexpected
+skip fails the final check, without changing branch protection.
+
 When only `releases/v<assetVersion>.json` files are added or modified, it checks
 each changed feed against the newest published, non-prerelease Release in that
 channel, using the same `created_at` selection as the manual manifest updater.
@@ -217,7 +231,8 @@ with **Update download manifest** before retrying verification.
 
 Changes to any other files also run shell linting, REUSE checks, a clean full
 build, compliance validation, and a QEMU `aarch64` boot smoke test. Mixed changes
-run both checks. Manual runs, new-branch pushes without a previous tree, and
+run both workflows independently, so a VM build failure does not prevent the
+download verification from running. Manual runs, new-branch pushes without a previous tree, and
 empty diffs retain full build verification; they do not revalidate unchanged
 historical feeds. A failed change classification fails the check.
 Manifest-only runs do not produce new build artifacts.

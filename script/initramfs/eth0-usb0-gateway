@@ -1,6 +1,22 @@
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 Afcoo
+# SPDX-FileCopyrightText: 2026 GodSeon
 # SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Optional behaviour for uplinks whose address is managed outside this script
+# (both unset by default, which keeps the behaviour unchanged):
+# THRURNDIS_RNDIS_ALLOW_SUBNET_ONLY=1 accepts an uplink whose IPv4 address is
+# configured elsewhere (static, or another DHCP client) and may come without
+# a default gateway or DNS server, such as a router-less Wi-Fi network.
+# Host-link traffic is then routed on-link, the DNS proxy is left out, and
+# this script never runs DHCP on the uplink; routes the uplink has through
+# other gateways are copied into the policy table so host-link traffic
+# follows them too.
+# THRURNDIS_RNDIS_HOLD_ROUTE_READY=1 keeps THRURNDIS_RNDIS_ROUTE_READY at 1
+# once it has been announced in this boot: the app only starts its managed
+# network once per USB attach, so a single =0 while the uplink drops or is
+# rebuilt would leave the Mac without the host link until the user restarts
+# it.
 
 BB=/usr/bin/busybox
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
@@ -16,6 +32,9 @@ RNDIS_DHCP_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TIMEOUT_SECONDS:-2}
 RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS=${THRURNDIS_RNDIS_DHCP_TOTAL_TIMEOUT_SECONDS:-6}
 NFT_TABLE=${THRURNDIS_NFT_TABLE:-thrurndis}
 RNDIS_RESOLV_CONF=${THRURNDIS_RNDIS_RESOLV_CONF:-/etc/resolv.conf}
+ALLOW_SUBNET_ONLY=${THRURNDIS_RNDIS_ALLOW_SUBNET_ONLY:-0}
+HOLD_ROUTE_READY=${THRURNDIS_RNDIS_HOLD_ROUTE_READY:-0}
+ROUTE_READY_MARK=/run/thrurndis-route-ready-announced
 HOST_LINK_GUEST_IPV4=192.168.100.1
 HOST_LINK_GUEST_CIDR=192.168.100.1/24
 HOST_LINK_HOST_IPV4=192.168.100.2
@@ -42,11 +61,22 @@ fi
 # shellcheck source=/usr/local/libexec/thrurndis/port-forwarding
 . "$PORT_FORWARDING_MODULE"
 
+# Withdrawals are held back once the host link has been ready (see above).
+route_ready_held() {
+    [ "$HOLD_ROUTE_READY" = 1 ] && [ -e "$ROUTE_READY_MARK" ]
+}
+
 announce_route_ready() {
+    if [ "$1" = 1 ]; then
+        : >"$ROUTE_READY_MARK" 2>/dev/null || true
+    elif route_ready_held; then
+        return 0
+    fi
     log_console "THRURNDIS_RNDIS_ROUTE_READY=$1"
 }
 
 announce_rndis_ipv4() {
+    [ -z "${1:-}" ] && route_ready_held && return 0
     log_console "THRURNDIS_RNDIS_IPV4=${1:-}"
 }
 
@@ -301,6 +331,14 @@ ensure_rndis_gateway() {
 
     ipv4=$(interface_ipv4_address "$iface" || true)
     gateway=$(interface_default_gateway "$iface")
+    if [ "$ALLOW_SUBNET_ONLY" = 1 ]; then
+        if [ -z "$ipv4" ]; then
+            log_console "RNDIS interface $iface has no IPv4 address"
+            return 1
+        fi
+        printf '%s' "$gateway"
+        return 0
+    fi
     dns_server=$(rndis_dns_server || true)
     if [ -z "$ipv4" ] || [ -z "$gateway" ] || [ -z "$dns_server" ]; then
         configure_rndis_ipv4 "$iface" || return 1
@@ -376,6 +414,46 @@ has_ingress_policy_rule() {
 install_policy_route() {
     rndis_gateway=$1
 
+    if [ -n "$rndis_gateway" ]; then
+        install_policy_gateway_route "$rndis_gateway" || return 1
+    elif ! ip route replace default dev "$RNDIS_IFACE" scope link table "$TABLE_ID" \
+        2>/tmp/thrurndis-policy-route.err; then
+        output=$($BB cat /tmp/thrurndis-policy-route.err 2>/dev/null || true)
+        log_console "failed to install host-link ingress on-link route via $RNDIS_IFACE: ${output}"
+        return 1
+    fi
+
+    if [ "$ALLOW_SUBNET_ONLY" = 1 ]; then
+        uplink_extra_routes | while read -r destination via; do
+            ip route replace "$destination" via "$via" dev "$RNDIS_IFACE" table "$TABLE_ID" 2>/dev/null ||
+                log_console "failed to copy $destination via $via into table $TABLE_ID"
+        done
+    fi
+
+    delete_policy_rule
+    if ip rule add priority "$RULE_PRIORITY" from "$HOST_LINK_HOST_CIDR" \
+        iif "$INGRESS_IFACE" table "$TABLE_ID" \
+        2>/tmp/thrurndis-policy-rule.err; then
+        ip route flush cache 2>/dev/null || true
+        log_console "configured ingress policy route: from $HOST_LINK_HOST_CIDR iif $INGRESS_IFACE lookup $TABLE_ID ${rndis_gateway:+via $rndis_gateway }dev $RNDIS_IFACE"
+        return 0
+    fi
+
+    output=$($BB cat /tmp/thrurndis-policy-rule.err 2>/dev/null || true)
+    log_console "failed to install ingress policy rule for $HOST_LINK_HOST_CIDR on $INGRESS_IFACE: ${output}"
+    return 1
+}
+
+# "<destination> <gateway>" for each route of the uplink through a gateway,
+# other than its default route.
+uplink_extra_routes() {
+    ip -4 route show dev "$RNDIS_IFACE" 2>/dev/null |
+        $BB awk '$1 != "default" && $2 == "via" { print $1, $3 }'
+}
+
+install_policy_gateway_route() {
+    rndis_gateway=$1
+
     if ! ip route replace "$rndis_gateway/32" dev "$RNDIS_IFACE" scope link table "$TABLE_ID" \
         2>/tmp/thrurndis-policy-link-route.err; then
         output=$($BB cat /tmp/thrurndis-policy-link-route.err 2>/dev/null || true)
@@ -389,23 +467,24 @@ install_policy_route() {
         log_console "failed to install host-link ingress default route via $RNDIS_IFACE: ${output}"
         return 1
     fi
+    return 0
+}
 
-    delete_policy_rule
-    if ip rule add priority "$RULE_PRIORITY" from "$HOST_LINK_HOST_CIDR" \
-        iif "$INGRESS_IFACE" table "$TABLE_ID" \
-        2>/tmp/thrurndis-policy-rule.err; then
-        ip route flush cache 2>/dev/null || true
-        log_console "configured ingress policy route: from $HOST_LINK_HOST_CIDR iif $INGRESS_IFACE lookup $TABLE_ID via $rndis_gateway dev $RNDIS_IFACE"
-        return 0
+dns_proxy_summary() {
+    if [ -n "$1" ]; then
+        printf '%s' "$HOST_LINK_GUEST_IPV4:53 -> $1:53"
+    else
+        printf 'proxy off'
     fi
-
-    output=$($BB cat /tmp/thrurndis-policy-rule.err 2>/dev/null || true)
-    log_console "failed to install ingress policy rule for $HOST_LINK_HOST_CIDR on $INGRESS_IFACE: ${output}"
-    return 1
 }
 
 install_nftables() {
     rndis_dns=$1
+    dns_proxy_rules=""
+    if [ -n "$rndis_dns" ]; then
+        dns_proxy_rules="ip saddr $HOST_LINK_HOST_CIDR iifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_GUEST_IPV4 udp dport 53 dnat to $rndis_dns
+        ip saddr $HOST_LINK_HOST_CIDR iifname \"$INGRESS_IFACE\" ip daddr $HOST_LINK_GUEST_IPV4 tcp dport 53 dnat to $rndis_dns"
+    fi
 
     if ! thrurndis_pf_prepare_nft_rules; then
         log_console "refusing to install nftables with invalid port forwarding boot configuration"
@@ -431,8 +510,7 @@ table ip $NFT_TABLE {
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
         $THRURNDIS_PF_PREROUTING_RULES
-        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 udp dport 53 dnat to $rndis_dns
-        ip saddr $HOST_LINK_HOST_CIDR iifname "$INGRESS_IFACE" ip daddr $HOST_LINK_GUEST_IPV4 tcp dport 53 dnat to $rndis_dns
+        $dns_proxy_rules
     }
 
     chain forward {
@@ -458,7 +536,7 @@ EOF_NFT
             fi
             return 1
         fi
-        log_console "configured nftables host-link-to-RNDIS masquerade and DNS proxy: $HOST_LINK_HOST_CIDR on $INGRESS_IFACE, $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53 on $RNDIS_IFACE"
+        log_console "configured nftables host-link-to-RNDIS masquerade and DNS proxy: $HOST_LINK_HOST_CIDR on $INGRESS_IFACE, $(dns_proxy_summary "$rndis_dns") on $RNDIS_IFACE"
         if [ "$THRURNDIS_PF_ENABLED" -eq 1 ]; then
             log_console "configured TCP and UDP port forwarding without port translation: $THRURNDIS_PF_PORTS"
         fi
@@ -511,7 +589,7 @@ gateway_up() {
         return 1
     }
     rndis_dns=$(rndis_dns_server || true)
-    if [ -z "$rndis_dns" ]; then
+    if [ -z "$rndis_dns" ] && [ "$ALLOW_SUBNET_ONLY" != 1 ]; then
         log_console "RNDIS DHCP did not provide an IPv4 DNS server"
         clear_gateway_state
         return 1
@@ -541,7 +619,7 @@ gateway_up() {
         return 1
     fi
 
-    log_console "gateway ready: host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
+    log_console "gateway ready: host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via ${rndis_gateway:-on-link}, DNS $(dns_proxy_summary "$rndis_dns")"
     announce_rndis_ipv4 "$rndis_ipv4"
     announce_route_ready 1
     thrurndis_pf_announce_active_state || true
@@ -578,11 +656,11 @@ gateway_status() {
         echo "$RNDIS_IFACE has no canonical IPv4 address"
         missing=1
     fi
-    if [ -z "$rndis_gateway" ]; then
+    if [ -z "$rndis_gateway" ] && [ "$ALLOW_SUBNET_ONLY" != 1 ]; then
         echo "$RNDIS_IFACE has no default gateway"
         missing=1
     fi
-    if [ -z "$rndis_dns" ]; then
+    if [ -z "$rndis_dns" ] && [ "$ALLOW_SUBNET_ONLY" != 1 ]; then
         echo "$RNDIS_IFACE has no DHCP DNS server"
         missing=1
     fi
@@ -596,6 +674,17 @@ gateway_status() {
         $BB grep -F "dev $RNDIS_IFACE" >/dev/null 2>&1; then
         echo "missing policy link route to RNDIS gateway $rndis_gateway"
         missing=1
+    fi
+
+    if [ "$ALLOW_SUBNET_ONLY" = 1 ]; then
+        absent=$(uplink_extra_routes | while read -r destination via; do
+            ip route show table "$TABLE_ID" "$destination" 2>/dev/null |
+                $BB grep -qF "via $via" || echo "$destination via $via"
+        done)
+        if [ -n "$absent" ]; then
+            echo "missing policy routes: $(echo $absent)"
+            missing=1
+        fi
     fi
 
     if ! has_ingress_policy_rule "$HOST_LINK_HOST_IPV4"; then
@@ -661,7 +750,7 @@ gateway_status() {
     fi
 
     if [ "$missing" -eq 0 ]; then
-        echo "ready host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via $rndis_gateway table $TABLE_ID, DNS $HOST_LINK_GUEST_IPV4:53 -> $rndis_dns:53"
+        echo "ready host $HOST_LINK_HOST_CIDR -> $HOST_LINK_GUEST_CIDR on $INGRESS_IFACE -> $RNDIS_IFACE via ${rndis_gateway:-on-link} table $TABLE_ID, DNS $(dns_proxy_summary "$rndis_dns")"
         return 0
     fi
 

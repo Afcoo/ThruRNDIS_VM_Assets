@@ -78,6 +78,16 @@ they are not host-side setup scripts and are not run by the macOS app.
   discard stale device addresses. It emits
   `THRURNDIS_RNDIS_ROUTE_READY=1` only after all gateway state succeeds and
   emits `THRURNDIS_RNDIS_ROUTE_READY=0` before rebuild or after teardown.
+- Two opt-in environment variables let a VM image that manages its uplink
+  address itself reuse `eth0-usb0-gateway` with another interface in
+  `THRURNDIS_RNDIS_IFACE`. Both are unset here, which keeps the behaviour
+  above. `THRURNDIS_RNDIS_ALLOW_SUBNET_ONLY=1` never runs DHCP on the uplink,
+  accepts an address without a default gateway or DNS server (an on-link
+  `default dev` policy route and no DNS DNAT), and copies the uplink's other
+  `via` routes into the policy table. `THRURNDIS_RNDIS_HOLD_ROUTE_READY=1`
+  stops emitting `THRURNDIS_RNDIS_ROUTE_READY=0` and an empty
+  `THRURNDIS_RNDIS_IPV4=` once readiness has been announced in that boot, so
+  a brief uplink loss does not stop the app's managed network.
 - `port-forwarding` is a side-effect-free shell module sourced from the
   fixed path `/usr/local/libexec/thrurndis/port-forwarding` by
   `eth0-usb0-gateway`. It parses the optional immutable kernel argument
